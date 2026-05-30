@@ -42,3 +42,6 @@ yarn-error.*
 
 # Claude Code session state
 .claude/
+
+# AI assistant context (local only)
+CLAUDE.md
