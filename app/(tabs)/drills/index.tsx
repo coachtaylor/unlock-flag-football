@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Animated,
   Easing,
-  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -16,6 +15,8 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "../../../components/ui/Button";
 import { Card } from "../../../components/ui/Card";
 import { Eyebrow } from "../../../components/ui/Eyebrow";
+import { HeaderIconButton } from "../../../components/ui/HeaderIconButton";
+import { SheetContainer, SheetSectionLabel } from "../../../components/ui/Sheet";
 import { PhaseChip } from "../../../components/DrillForm";
 import { colors, radius, spacing, tracking } from "../../../constants/design";
 import { fontStyle, monoStyle } from "../../../constants/typography";
@@ -117,55 +118,6 @@ function SkeletonRow() {
         opacity,
       }}
     />
-  );
-}
-
-function HeaderIconButton({
-  icon,
-  variant,
-  onPress,
-  accessibilityLabel,
-}: {
-  icon: React.ComponentProps<typeof Ionicons>["name"];
-  variant: "solid" | "primary";
-  onPress: () => void;
-  accessibilityLabel: string;
-}) {
-  const isPrimary = variant === "primary";
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel}
-      hitSlop={6}
-    >
-      {({ pressed }) => (
-        <View
-          style={{
-            width: 36,
-            height: 36,
-            borderRadius: radius.lg,
-            backgroundColor: isPrimary
-              ? colors.orange[500]
-              : colors.surface.raised,
-            borderWidth: 1,
-            borderColor: isPrimary
-              ? colors.orange[500]
-              : colors.border.card,
-            alignItems: "center",
-            justifyContent: "center",
-            opacity: pressed ? 0.85 : 1,
-            transform: [{ scale: pressed ? 0.96 : 1 }],
-          }}
-        >
-          <Ionicons
-            name={icon}
-            size={16}
-            color={isPrimary ? colors.text.onBrand : colors.text.primary}
-          />
-        </View>
-      )}
-    </Pressable>
   );
 }
 
@@ -904,6 +856,10 @@ export default function DrillListScreen() {
     router.push("/drills/new" as never);
   };
 
+  const goToLibrary = () => {
+    router.push("/drills/library" as never);
+  };
+
   const headerPaddingTop = insets.top + spacing.md;
   const formatLabel = (teamFormat ?? "5V5").toUpperCase();
   const eyebrowLeft = teamName
@@ -992,6 +948,12 @@ export default function DrillListScreen() {
                 if (searchOpen) setSearch("");
               }}
               accessibilityLabel="Search drills"
+            />
+            <HeaderIconButton
+              icon="albums-outline"
+              variant="solid"
+              onPress={goToLibrary}
+              accessibilityLabel="Browse preset library"
             />
             <HeaderIconButton
               icon="add"
@@ -1430,79 +1392,6 @@ function FilterButton({
         </View>
       )}
     </Pressable>
-  );
-}
-
-function SheetContainer({
-  open,
-  onClose,
-  children,
-}: {
-  open: boolean;
-  onClose: () => void;
-  children: React.ReactNode;
-}) {
-  const insets = useSafeAreaInsets();
-  return (
-    <Modal
-      visible={open}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
-      <Pressable
-        onPress={onClose}
-        style={{
-          flex: 1,
-          backgroundColor: colors.scrim,
-          justifyContent: "flex-end",
-        }}
-      >
-        <Pressable
-          onPress={(e) => e.stopPropagation()}
-          style={{
-            backgroundColor: colors.surface.raised,
-            borderTopLeftRadius: 20,
-            borderTopRightRadius: 20,
-            borderTopWidth: 1,
-            borderColor: colors.border.card,
-            paddingHorizontal: spacing.xl,
-            paddingTop: spacing.md,
-            paddingBottom: insets.bottom + spacing.xl,
-            gap: spacing.lg,
-          }}
-        >
-          <View
-            style={{
-              alignSelf: "center",
-              width: 36,
-              height: 4,
-              borderRadius: 2,
-              backgroundColor: colors.border.strong,
-            }}
-          />
-          {children}
-        </Pressable>
-      </Pressable>
-    </Modal>
-  );
-}
-
-function SheetSectionLabel({ children }: { children: string }) {
-  return (
-    <Text
-      style={[
-        fontStyle("bold"),
-        {
-          fontSize: 11,
-          letterSpacing: 1.4,
-          textTransform: "uppercase",
-          color: colors.text.label,
-        },
-      ]}
-    >
-      {children}
-    </Text>
   );
 }
 
