@@ -2,8 +2,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Linking,
-  Modal,
-  Pressable,
   ScrollView,
   Text,
   TouchableOpacity,
@@ -28,6 +26,7 @@ import {
 import { SKILL_GROUP_META } from "../../../../constants/skill-groups";
 import { loadDrillSkills, type TaggedSkill } from "../../../../lib/skills";
 import { Button } from "../../../../components/ui/Button";
+import { ConfirmDialog } from "../../../../components/ui/ConfirmDialog";
 import { colors, radius, spacing } from "../../../../constants/design";
 import { fontStyle, monoStyle } from "../../../../constants/typography";
 import { supabase } from "../../../../lib/supabase";
@@ -909,95 +908,22 @@ export default function DrillDetailScreen() {
         </View>
       )}
 
-      {/* Delete confirmation modal */}
-      <Modal
-        visible={confirmDeleteOpen}
-        animationType="fade"
-        transparent
-        onRequestClose={() => !deleting && setConfirmDeleteOpen(false)}
-      >
-        <Pressable
-          onPress={() => !deleting && setConfirmDeleteOpen(false)}
-          style={{
-            flex: 1,
-            backgroundColor: colors.scrim,
-            alignItems: "center",
-            justifyContent: "center",
-            paddingHorizontal: spacing.xl,
-          }}
-        >
-          <Pressable
-            onPress={(e) => e.stopPropagation()}
-            style={{
-              width: "100%",
-              maxWidth: 380,
-              backgroundColor: colors.surface.raised,
-              borderRadius: radius.lg,
-              borderWidth: 1,
-              borderColor: colors.border.card,
-              padding: spacing.xl,
-              gap: spacing.md,
-            }}
-          >
-            <Text
-              style={[
-                fontStyle("bold"),
-                { fontSize: 18, color: colors.text.primary },
-              ]}
-            >
-              Delete drill?
-            </Text>
-            <Text
-              style={[
-                fontStyle("regular"),
-                {
-                  fontSize: 14,
-                  lineHeight: 20,
-                  color: colors.text.secondary,
-                },
-              ]}
-            >
-              {drill?.drill_name
-                ? `"${drill.drill_name}" will be removed from your team library. This can't be undone.`
-                : "This drill will be removed from your team library. This can't be undone."}
-            </Text>
-            {deleteError ? (
-              <Text
-                style={{
-                  fontSize: 13,
-                  color: colors.errorLight,
-                }}
-              >
-                {deleteError}
-              </Text>
-            ) : null}
-            <View
-              style={{
-                flexDirection: "row",
-                gap: spacing.sm,
-                marginTop: spacing.sm,
-              }}
-            >
-              <View style={{ flex: 1 }}>
-                <Button
-                  label="Cancel"
-                  variant="secondary"
-                  onPress={() => setConfirmDeleteOpen(false)}
-                  disabled={deleting}
-                />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Button
-                  label={deleting ? "Deleting…" : "Delete"}
-                  variant="destructive"
-                  onPress={handleDelete}
-                  disabled={deleting}
-                />
-              </View>
-            </View>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/* Delete confirmation */}
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        onCancel={() => setConfirmDeleteOpen(false)}
+        onConfirm={handleDelete}
+        title="Delete drill?"
+        body={
+          drill?.drill_name
+            ? `"${drill.drill_name}" will be removed from your team library. This can't be undone.`
+            : "This drill will be removed from your team library. This can't be undone."
+        }
+        confirmLabel="Delete"
+        pendingLabel="Deleting…"
+        pending={deleting}
+        error={deleteError}
+      />
     </View>
   );
 }

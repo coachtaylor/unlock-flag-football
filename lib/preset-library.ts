@@ -168,3 +168,20 @@ export async function clonePresetDrill(
   if (!drillId) return { ok: false, error: "Clone returned no drill id." };
   return { ok: true, drillId };
 }
+
+export type RemoveCloneResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Remove this team's clone of a preset from the team library. Deletes the
+ * team_drills row (same hard-delete the drill library / drill detail uses) —
+ * this only ever touches the team's COPY. The global preset_drills row is
+ * never affected; the preset stays browsable and re-addable.
+ */
+export async function removeClonedDrill(
+  drillId: string
+): Promise<RemoveCloneResult> {
+  if (!drillId) return { ok: false, error: "Missing drill id." };
+  const { error } = await supabase.from("team_drills").delete().eq("id", drillId);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}

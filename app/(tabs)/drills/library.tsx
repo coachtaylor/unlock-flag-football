@@ -12,6 +12,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card } from "../../../components/ui/Card";
+import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { Eyebrow } from "../../../components/ui/Eyebrow";
 import { HeaderIconButton } from "../../../components/ui/HeaderIconButton";
 import { SheetContainer, SheetSectionLabel } from "../../../components/ui/Sheet";
@@ -26,6 +27,7 @@ import {
 import {
   clonePresetDrill,
   loadPresetLibrary,
+  removeClonedDrill,
   type PresetDrillWithSkills,
 } from "../../../lib/preset-library";
 import type { TaggedSkill } from "../../../lib/skills";
@@ -66,6 +68,14 @@ export default function PresetLibraryScreen() {
     new Set()
   );
   const [hideCloned, setHideCloned] = useState(false);
+
+  // Remove-clone confirmation. Holds the preset whose team copy is being
+  // removed; the ConfirmDialog reads it for the drill name.
+  const [removeTarget, setRemoveTarget] = useState<PresetDrillWithSkills | null>(
+    null
+  );
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!teamId) return;
@@ -134,6 +144,20 @@ export default function PresetLibraryScreen() {
     setActiveFormats(new Set());
     setActivePositions(new Set());
     setHideCloned(false);
+  };
+
+  const confirmRemove = async () => {
+    if (!removeTarget?.clonedDrillId || removing) return;
+    setRemoving(true);
+    setRemoveError(null);
+    const result = await removeClonedDrill(removeTarget.clonedDrillId);
+    setRemoving(false);
+    if (!result.ok) {
+      setRemoveError(result.error);
+      return;
+    }
+    setRemoveTarget(null);
+    await load();
   };
 
   const headerPaddingTop = insets.top + spacing.md;
@@ -319,6 +343,10 @@ export default function PresetLibraryScreen() {
                 teamId={teamId ?? ""}
                 onCloned={(drillId) => router.push(`/drills/${drillId}` as never)}
                 onOpen={(drillId) => router.push(`/drills/${drillId}` as never)}
+                onRequestRemove={() => {
+                  setRemoveError(null);
+                  setRemoveTarget(p);
+                }}
               />
             ))}
           </View>
@@ -339,6 +367,25 @@ export default function PresetLibraryScreen() {
         setHideCloned={setHideCloned}
         onClear={clearAll}
       />
+
+      <ConfirmDialog
+        open={removeTarget !== null}
+        onCancel={() => {
+          if (!removing) {
+            setRemoveTarget(null);
+            setRemoveError(null);
+          }
+        }}
+        onConfirm={confirmRemove}
+        title="Remove from library?"
+        body={`"${
+          removeTarget?.drill_name ?? "This drill"
+        }" will be removed from your team library. The preset stays available to add again.`}
+        confirmLabel="Remove"
+        pendingLabel="Removing…"
+        pending={removing}
+        error={removeError}
+      />
     </View>
   );
 }
@@ -350,11 +397,13 @@ function PresetCard({
   teamId,
   onCloned,
   onOpen,
+  onRequestRemove,
 }: {
   preset: PresetDrillWithSkills;
   teamId: string;
   onCloned: (drillId: string) => void;
   onOpen: (drillId: string) => void;
+  onRequestRemove: () => void;
 }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -389,30 +438,50 @@ function PresetCard({
         <View style={{ flex: 1, padding: spacing.lg, gap: spacing.sm }}>
           {/* Title + meta. Presets are NOT labeled as benchmarks — benchmark
               designation is a captain opt-in after cloning (see the clone RPC),
-              so no "Bench" badge here. */}
-          <View style={{ gap: 2 }}>
-            <Text
-              style={[
-                fontStyle("bold"),
-                { fontSize: 15, color: colors.text.primary },
-              ]}
-            >
-              {preset.drill_name}
-            </Text>
-            {metaParts.length > 0 && (
+              so no "Bench" badge here. Trash (top-right) removes the team's
+              clone; only shown once cloned. */}
+          <View
+            style={{ flexDirection: "row", alignItems: "flex-start", gap: spacing.sm }}
+          >
+            <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
               <Text
                 style={[
-                  monoStyle("medium"),
-                  {
-                    fontSize: 10,
-                    color: colors.text.muted,
-                    letterSpacing: 0.6,
-                    textTransform: "uppercase",
-                  },
+                  fontStyle("bold"),
+                  { fontSize: 15, color: colors.text.primary },
                 ]}
               >
-                {metaParts.join(" · ")}
+                {preset.drill_name}
               </Text>
+              {metaParts.length > 0 && (
+                <Text
+                  style={[
+                    monoStyle("medium"),
+                    {
+                      fontSize: 10,
+                      color: colors.text.muted,
+                      letterSpacing: 0.6,
+                      textTransform: "uppercase",
+                    },
+                  ]}
+                >
+                  {metaParts.join(" · ")}
+                </Text>
+              )}
+            </View>
+            {preset.alreadyCloned && preset.clonedDrillId && (
+              <TouchableOpacity
+                onPress={onRequestRemove}
+                activeOpacity={0.7}
+                hitSlop={8}
+                accessibilityLabel="Remove from library"
+                style={{ padding: 2 }}
+              >
+                <Ionicons
+                  name="trash-outline"
+                  size={17}
+                  color={colors.red.semantic}
+                />
+              </TouchableOpacity>
             )}
           </View>
 
@@ -483,7 +552,7 @@ function PresetCard({
                 <Text
                   style={[
                     fontStyle("semibold"),
-                    { fontSize: 11.5, color: colors.text.muted },
+                    { fontSize: 11.5, color: colors.lime[400] },
                   ]}
                 >
                   In library →
