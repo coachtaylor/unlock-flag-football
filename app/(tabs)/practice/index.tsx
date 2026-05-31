@@ -41,6 +41,7 @@ type PlanVM = {
   attending: number | null; // completed only
   completion: number | null; // completed only, 0..1
   progressMin: number | null; // live only
+  pastDue: boolean; // scheduled/live but >6h past its scheduled start
 };
 
 // ── helpers ─────────────────────────────────────────────────────────
@@ -60,6 +61,31 @@ function dayOffsetFrom(iso: string | null): number | null {
   const [y, m, d] = iso.split("-").map(Number);
   const date = new Date(y, (m ?? 1) - 1, d ?? 1);
   return Math.round((date.getTime() - startOfToday().getTime()) / 86_400_000);
+}
+
+// A live/scheduled practice whose scheduled start slipped more than this long
+// ago is treated as stale: if it's still live it gets paused (back to
+// scheduled), and either way it surfaces under "Needs Attention" with a
+// Past Due badge.
+const PAST_DUE_GRACE_MS = 6 * 60 * 60 * 1000;
+
+function isPastDue(
+  practiceDate: string | null,
+  startTime: string | null,
+  now: number
+): boolean {
+  if (!practiceDate) return false;
+  const [y, m, d] = practiceDate.split("-").map(Number);
+  if (!y || !m || !d) return false;
+  let dueMs: number;
+  if (startTime) {
+    const [hh = 0, mm = 0] = startTime.split(":").map(Number);
+    dueMs = new Date(y, m - 1, d, hh, mm, 0, 0).getTime();
+  } else {
+    // No start time — anchor to end of that day so we don't flag it early.
+    dueMs = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+  }
+  return now - dueMs > PAST_DUE_GRACE_MS;
 }
 
 function todayIso(): string {
@@ -983,9 +1009,50 @@ function HeroCard({
   );
 }
 
+// ── past-due badge ──────────────────────────────────────────────────
+
+function PastDueBadge() {
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        borderRadius: radius.full,
+        backgroundColor: "rgba(255,77,77,0.12)",
+        borderWidth: 1,
+        borderColor: `${colors.red.semantic}33`,
+      }}
+    >
+      <Ionicons name="alert-circle" size={11} color={colors.red.semantic} />
+      <MonoText
+        weight="bold"
+        style={{
+          fontSize: 9,
+          color: colors.red.semantic,
+          letterSpacing: 1,
+          textTransform: "uppercase",
+        }}
+      >
+        Past Due
+      </MonoText>
+    </View>
+  );
+}
+
 // ── compact plan card ───────────────────────────────────────────────
 
-function PlanCard({ plan, onPress }: { plan: PlanVM; onPress: () => void }) {
+function PlanCard({
+  plan,
+  onPress,
+  pastDue,
+}: {
+  plan: PlanVM;
+  onPress: () => void;
+  pastDue?: boolean;
+}) {
   const isCompleted = plan.status === "completed";
   return (
     <TouchableOpacity
@@ -1028,7 +1095,7 @@ function PlanCard({ plan, onPress }: { plan: PlanVM; onPress: () => void }) {
             </Text>
             <MetaRow plan={plan} />
           </View>
-          <StatusPill status={plan.status} mini />
+          {pastDue ? <PastDueBadge /> : <StatusPill status={plan.status} mini />}
         </View>
 
         {plan.drills > 0 ? (
@@ -1215,14 +1282,22 @@ export default function PracticeListScreen() {
     setRoster(rosterRes.count ?? 0);
 
     const now = Date.now();
-    setPlans(
-      rows.map((r) => {
+    // Live practices that slipped >6h past their scheduled start are stale —
+    // pause them (back to scheduled) so the run timer stops. The write is
+    // fired once below; the VM reflects the paused status immediately.
+    const toPause: string[] = [];
+    const next = rows.map((r) => {
         const ppd = r.practice_plan_drills ?? [];
         const duration = ppd.reduce(
           (s, d) => s + (d.duration_minutes ?? 0),
           0
         );
-        const status = normalizeStatus(r.status);
+        const pastDue = isPastDue(r.practice_date, r.start_time, now);
+        let status = normalizeStatus(r.status);
+        if (status === "live" && pastDue) {
+          toPause.push(r.id);
+          status = "scheduled";
+        }
         const vm: PlanVM = {
           id: r.id,
           title: r.title,
@@ -1236,6 +1311,7 @@ export default function PracticeListScreen() {
           attending: null,
           completion: null,
           progressMin: null,
+          pastDue,
         };
         if (status === "completed") {
           const log = logsByPlan.get(r.id);
@@ -1252,8 +1328,19 @@ export default function PracticeListScreen() {
           vm.progressMin = Math.max(0, Math.min(duration, elapsed));
         }
         return vm;
-      })
-    );
+      });
+
+    if (toPause.length > 0) {
+      const { error } = await supabase
+        .from("practice_plans")
+        .update({ status: "scheduled", started_at: null })
+        .in("id", toPause);
+      if (error) {
+        console.warn("auto-pause past-due practices failed:", error.message);
+      }
+    }
+
+    setPlans(next);
   }, [teamId]);
 
   useEffect(() => {
@@ -1416,15 +1503,25 @@ export default function PracticeListScreen() {
       (b.practiceDate ?? "0000-00-00").localeCompare(
         a.practiceDate ?? "0000-00-00"
       );
-    const live = plans.filter((p) => p.status === "live").sort(byDateDesc);
+    // Stale scheduled/live practices (>6h past start) — surfaced separately.
+    const needsAttention = plans
+      .filter(
+        (p) => p.pastDue && (p.status === "scheduled" || p.status === "live")
+      )
+      .sort(byDateDesc);
+    const naIds = new Set(needsAttention.map((p) => p.id));
+    const live = plans
+      .filter((p) => p.status === "live" && !naIds.has(p.id))
+      .sort(byDateDesc);
     const upcoming = plans
-      .filter((p) => p.status === "scheduled")
+      .filter((p) => p.status === "scheduled" && !naIds.has(p.id))
       .sort(byDateAsc);
     const drafts = plans.filter((p) => p.status === "draft").sort(byDateAsc);
     const completed = plans
       .filter((p) => p.status === "completed")
       .sort(byDateDesc);
     return {
+      needsAttention,
       live,
       nextUp: upcoming[0] ?? null,
       restWeek: upcoming.slice(1),
@@ -1555,6 +1652,26 @@ export default function PracticeListScreen() {
             avgAttend={cadence.avgAttend}
             onFieldTotal={cadence.onFieldTotal}
           />
+        )}
+
+        {groups.needsAttention.length > 0 && (
+          <>
+            <GroupHeader
+              label="Needs Attention!"
+              count={groups.needsAttention.length}
+              color={colors.red.semantic}
+            />
+            <View style={{ paddingHorizontal: PADH, gap: 10 }}>
+              {groups.needsAttention.map((p) => (
+                <PlanCard
+                  key={p.id}
+                  plan={p}
+                  pastDue
+                  onPress={() => goToPlan(p.id)}
+                />
+              ))}
+            </View>
+          </>
         )}
 
         {groups.live.map((p) => (
