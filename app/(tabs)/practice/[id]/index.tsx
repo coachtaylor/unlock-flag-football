@@ -27,6 +27,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "../../../../components/ui/Button";
 import { Eyebrow } from "../../../../components/ui/Eyebrow";
 import { PastDueModal } from "../../../../components/ui/PastDueModal";
+import { DeleteConfirmModal } from "../../../../components/ui/DeleteConfirmModal";
 import {
   PracticeAttendanceSheet,
   type AttendancePlayer,
@@ -503,6 +504,8 @@ export default function PracticePlanDetailScreen() {
   // Shown when arriving from a "Needs Attention" card (?pastdue=1). Lets the
   // coach reschedule, log, or delete the stale practice.
   const [pastDueOpen, setPastDueOpen] = useState(pastdue === "1");
+  // Permanent-delete confirm (archived plans only) — type-the-name gate.
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [log, setLog] = useState<PracticeLog | null>(null);
   const [busy, setBusy] = useState(false);
   const [attendancePlayers, setAttendancePlayers] = useState<
@@ -1109,39 +1112,30 @@ export default function PracticePlanDetailScreen() {
     );
   };
 
-  const deletePlan = () => {
+  // Permanent delete. Only reachable for already-archived plans, and only
+  // after the type-the-name confirm in DeleteConfirmModal — so there's no
+  // Alert here, just the mutation.
+  const deletePlan = async () => {
     if (!plan) return;
-    Alert.alert(
-      "Delete practice?",
-      "This permanently removes the plan and its schedule. This can't be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Delete",
-          style: "destructive",
-          onPress: async () => {
-            setBusy(true);
-            const { error } = await supabase
-              .from("practice_plans")
-              .delete()
-              .eq("id", plan.id);
-            setBusy(false);
-            if (error) {
-              Alert.alert("Couldn't delete practice", error.message);
-              return;
-            }
-            setPastDueOpen(false);
-            router.back();
-          },
-        },
-      ]
-    );
+    setBusy(true);
+    const { error } = await supabase
+      .from("practice_plans")
+      .delete()
+      .eq("id", plan.id);
+    setBusy(false);
+    if (error) {
+      Alert.alert("Couldn't delete practice", error.message);
+      return;
+    }
+    setDeleteOpen(false);
+    setPastDueOpen(false);
+    router.back();
   };
 
-  // Archive = soft delete. Once a practice has gone live (live/completed) it
-  // can't be hard-deleted, only archived (it keeps its real status and drops
-  // out of the active lists). A live plan can still be moved back to
-  // scheduled first, which makes it deletable again.
+  // Archive = soft delete, and the ONLY way to remove an active practice.
+  // Every status (draft/scheduled/live/completed) archives the same way:
+  // the row + all its data stay intact, it just drops out of the active
+  // lists. Deleting for good is a second step, available only once archived.
   const archivePlan = () => {
     if (!plan) return;
     Alert.alert(
@@ -2226,6 +2220,12 @@ export default function PracticePlanDetailScreen() {
               onPress={unarchivePlan}
               disabled={busy}
             />
+            <Button
+              label="Delete practice"
+              onPress={() => setDeleteOpen(true)}
+              disabled={busy}
+              variant="destructive"
+            />
           </View>
         ) : (
           <View style={{ marginTop: spacing["3xl"], gap: spacing.md }}>
@@ -2268,23 +2268,14 @@ export default function PracticePlanDetailScreen() {
                 variant="secondary"
               />
             )}
-            {/* Draft/scheduled can be deleted outright; once a practice has
-                gone live (live/completed) it can only be archived. */}
-            {plan.status === "draft" || plan.status === "scheduled" ? (
-              <Button
-                label={busy ? "Deleting…" : "Delete practice"}
-                onPress={deletePlan}
-                disabled={busy}
-                variant="destructive"
-              />
-            ) : (
-              <Button
-                label={busy ? "Archiving…" : "Archive practice"}
-                onPress={archivePlan}
-                disabled={busy}
-                variant="secondary"
-              />
-            )}
+            {/* Active practices are only ever archived — never deleted
+                directly. Deleting for good happens later, from the archive. */}
+            <Button
+              label={busy ? "Archiving…" : "Archive practice"}
+              onPress={archivePlan}
+              disabled={busy}
+              variant="secondary"
+            />
           </View>
         )}
       </ScrollView>
@@ -2302,7 +2293,7 @@ export default function PracticePlanDetailScreen() {
         open={pastDueOpen}
         onClose={() => setPastDueOpen(false)}
         title="This practice is past due."
-        body="It came and went without being closed out. Reschedule it, log what happened, or delete the plan."
+        body="It came and went without being closed out. Reschedule it, log what happened, or archive it."
         actions={[
           {
             label: "Log practice",
@@ -2320,20 +2311,22 @@ export default function PracticePlanDetailScreen() {
               router.push(`/practice/${plan.id}/edit` as never);
             },
           },
-          // Draft/scheduled can be deleted outright; live/completed can only
-          // be archived.
-          plan.status === "draft" || plan.status === "scheduled"
-            ? {
-                label: "Delete",
-                variant: "destructive" as const,
-                onPress: deletePlan,
-              }
-            : {
-                label: "Archive",
-                variant: "secondary" as const,
-                onPress: archivePlan,
-              },
+          // Active practices archive, never hard-delete. Permanent delete is
+          // a second step available only from the archive.
+          {
+            label: "Archive",
+            variant: "secondary" as const,
+            onPress: archivePlan,
+          },
         ]}
+      />
+
+      <DeleteConfirmModal
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        title={plan.title || "Untitled plan"}
+        busy={busy}
+        onConfirm={deletePlan}
       />
     </View>
   );

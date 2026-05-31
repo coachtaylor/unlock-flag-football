@@ -17,6 +17,7 @@ import { useFocusEffect, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "../../../components/ui/Button";
+import { DeleteConfirmModal } from "../../../components/ui/DeleteConfirmModal";
 import { Eyebrow } from "../../../components/ui/Eyebrow";
 import { colors, radius, spacing } from "../../../constants/design";
 import { fontStyle, MonoText } from "../../../constants/typography";
@@ -1237,6 +1238,10 @@ export default function PracticeListScreen() {
   const [roster, setRoster] = useState(0);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [duplicating, setDuplicating] = useState(false);
+  // The archived plan a coach is confirming a permanent delete on. Delete is
+  // only reachable from the archive, behind a type-the-name confirm.
+  const [deleteTarget, setDeleteTarget] = useState<PlanVM | null>(null);
+  const [deleting, setDeleting] = useState(false);
   // Collapsed section keys (view-only state, like the detail page's
   // expandable drill rows — not persisted).
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -1420,10 +1425,11 @@ export default function PracticeListScreen() {
     await load();
   };
 
-  // Single overflow menu for a card. Delete vs archive follows the lifecycle
-  // policy: draft/scheduled delete outright; live/completed archive only;
-  // archived unarchive. `duplicate` adds a Duplicate option (used by the
-  // hero, which folds its old duplicate icon into this menu).
+  // Single overflow menu for a card. Lifecycle policy: ANY active practice
+  // can only be archived (data is always kept). Deleting is only possible
+  // once a practice is archived, and goes through a type-the-name confirm
+  // modal. `duplicate` adds a Duplicate option (used by the hero, which
+  // folds its old duplicate icon into this menu).
   const openPlanMenu = (plan: PlanVM, opts?: { duplicate?: boolean }) => {
     lightHaptic();
     const buttons: Parameters<typeof Alert.alert>[2] = [];
@@ -1436,14 +1442,13 @@ export default function PracticeListScreen() {
         text: "Unarchive",
         onPress: () => doManage(plan, { archived_at: null }, "unarchive"),
       });
-    } else if (plan.status === "draft" || plan.status === "scheduled") {
-      warn = "Deleting removes the plan and its schedule. This can't be undone.";
       buttons!.push({
         text: "Delete",
         style: "destructive",
-        onPress: () => doManage(plan, null, "delete"),
+        onPress: () => setDeleteTarget(plan),
       });
     } else {
+      warn = "Practices are archived, not deleted — all data is kept. You can delete it permanently later from the archive.";
       buttons!.push({
         text: "Archive",
         onPress: () =>
@@ -1878,6 +1883,20 @@ export default function PracticeListScreen() {
           </>
         )}
       </ScrollView>
+
+      <DeleteConfirmModal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title={deleteTarget?.title || "Untitled plan"}
+        busy={deleting}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setDeleting(true);
+          await doManage(deleteTarget, null, "delete");
+          setDeleting(false);
+          setDeleteTarget(null);
+        }}
+      />
     </View>
   );
 }
