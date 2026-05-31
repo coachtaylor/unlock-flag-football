@@ -275,10 +275,12 @@ function DateTile({
   iso,
   dayOffset,
   size,
+  pastDue,
 }: {
   iso: string | null;
   dayOffset: number | null;
   size: number;
+  pastDue?: boolean;
 }) {
   if (!iso) {
     return (
@@ -312,10 +314,10 @@ function DateTile({
         borderRadius: radius.lg,
         backgroundColor: isToday ? colors.orange[500] : colors.surface.overlay,
         borderWidth: isToday ? 0 : 1,
-        borderColor: colors.border.strong,
+        borderColor: pastDue ? `${colors.red.semantic}55` : colors.border.strong,
         alignItems: "center",
         justifyContent: "center",
-        opacity: isPast ? 0.62 : 1,
+        opacity: pastDue ? 1 : isPast ? 0.62 : 1,
       }}
     >
       <MonoText
@@ -324,7 +326,11 @@ function DateTile({
           fontSize: 9,
           letterSpacing: 1,
           textTransform: "uppercase",
-          color: isToday ? "rgba(10,10,13,0.7)" : colors.text.secondary,
+          color: pastDue
+            ? colors.red.semantic
+            : isToday
+            ? "rgba(10,10,13,0.7)"
+            : colors.text.secondary,
         }}
       >
         {mon}
@@ -334,7 +340,11 @@ function DateTile({
         style={{
           fontSize: size >= 64 ? 24 : 20,
           lineHeight: size >= 64 ? 27 : 23,
-          color: isToday ? colors.text.onBrand : colors.text.primary,
+          color: pastDue
+            ? colors.red.semantic
+            : isToday
+            ? colors.text.onBrand
+            : colors.text.primary,
         }}
       >
         {day}
@@ -345,7 +355,11 @@ function DateTile({
           fontSize: 9,
           letterSpacing: 1,
           textTransform: "uppercase",
-          color: isToday ? "rgba(10,10,13,0.55)" : colors.text.muted,
+          color: pastDue
+            ? colors.red.semantic
+            : isToday
+            ? "rgba(10,10,13,0.55)"
+            : colors.text.muted,
         }}
       >
         {dow}
@@ -1013,32 +1027,17 @@ function HeroCard({
 
 function PastDueBadge() {
   return (
-    <View
+    <MonoText
+      weight="bold"
       style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 4,
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        borderRadius: radius.full,
-        backgroundColor: "rgba(255,77,77,0.12)",
-        borderWidth: 1,
-        borderColor: `${colors.red.semantic}33`,
+        fontSize: 10,
+        color: colors.red.semantic,
+        letterSpacing: 1,
+        textTransform: "uppercase",
       }}
     >
-      <Ionicons name="alert-circle" size={11} color={colors.red.semantic} />
-      <MonoText
-        weight="bold"
-        style={{
-          fontSize: 9,
-          color: colors.red.semantic,
-          letterSpacing: 1,
-          textTransform: "uppercase",
-        }}
-      >
-        Past Due
-      </MonoText>
-    </View>
+      Past Due
+    </MonoText>
   );
 }
 
@@ -1070,7 +1069,12 @@ function PlanCard({
         opacity: isCompleted ? 0.92 : 1,
       }}
     >
-      <DateTile iso={plan.practiceDate} dayOffset={plan.dayOffset} size={52} />
+      <DateTile
+        iso={plan.practiceDate}
+        dayOffset={plan.dayOffset}
+        size={52}
+        pastDue={pastDue}
+      />
       <View style={{ flex: 1, gap: 6, minWidth: 0 }}>
         <View
           style={{
