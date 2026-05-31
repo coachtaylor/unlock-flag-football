@@ -1044,12 +1044,12 @@ export default function PracticePlanDetailScreen() {
   const startPractice = () => {
     if (!plan) return;
     Alert.alert(
-      "Prep Practice?",
-      "This marks the practice as live so the team knows it's underway. Per-drill timing resets for a fresh run; tap Begin practice when you're ready to start the timer.",
+      "Start Practice?",
+      "This marks the practice as live so the team knows it's underway. Per-drill timing resets for a fresh run; tap Live Practice when you're ready to start the timer.",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Prep",
+          text: "Start",
           onPress: async () => {
             setBusy(true);
             // Prep Practice marks the plan live but does NOT start the
@@ -2110,7 +2110,7 @@ export default function PracticePlanDetailScreen() {
             )}
             {plan.status === "scheduled" && (
               <Button
-                label={busy ? "Prepping…" : "Prep Practice"}
+                label={busy ? "Starting…" : "Start Practice"}
                 onPress={startPractice}
                 disabled={busy}
               />
@@ -2118,7 +2118,7 @@ export default function PracticePlanDetailScreen() {
             {plan.status === "live" && (
               <>
                 <Button
-                  label="Begin practice"
+                  label="Live Practice"
                   onPress={() =>
                     router.push(`/practice/${plan.id}/run` as never)
                   }

@@ -545,11 +545,13 @@ function CadenceStrip({
 function LiveRibbon({
   plan,
   onPress,
+  onLive,
   onSendToScheduled,
   busy,
 }: {
   plan: PlanVM;
   onPress: () => void;
+  onLive: () => void;
   onSendToScheduled: () => void;
   busy: boolean;
 }) {
@@ -623,7 +625,10 @@ function LiveRibbon({
                 color={colors.text.primary}
               />
             </TouchableOpacity>
-            <View
+            <TouchableOpacity
+              accessibilityLabel="Live practice"
+              activeOpacity={0.85}
+              onPress={onLive}
               style={{
                 flexDirection: "row",
                 alignItems: "center",
@@ -634,6 +639,7 @@ function LiveRibbon({
                 borderRadius: 10,
               }}
             >
+              <Ionicons name="play" size={12} color={colors.text.onBrand} />
               <Text
                 style={[
                   fontStyle("bold"),
@@ -645,14 +651,9 @@ function LiveRibbon({
                   },
                 ]}
               >
-                Resume
+                Live
               </Text>
-              <Ionicons
-                name="chevron-forward"
-                size={12}
-                color={colors.text.onBrand}
-              />
-            </View>
+            </TouchableOpacity>
           </View>
         </View>
         <View
@@ -905,14 +906,18 @@ function HeroCard({
               opacity: starting ? 0.6 : 1,
             }}
           >
-            <Ionicons name="play" size={13} color={colors.text.primary} />
+            <Ionicons
+              name="clipboard-outline"
+              size={14}
+              color={colors.text.primary}
+            />
             <Text
               style={[
                 fontStyle("bold"),
                 { fontSize: 13, color: colors.text.primary },
               ]}
             >
-              {starting ? "Prepping…" : "Prep Practice"}
+              Prepare Practice
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -1252,29 +1257,6 @@ export default function PracticeListScreen() {
     router.push(`/practice/${id}/edit` as never);
   };
 
-  const startPractice = async (id: string) => {
-    lightHaptic();
-    setStartingId(id);
-    // Prep Practice marks the plan live but does NOT start the practice
-    // timer. The clock kicks off only when the coach taps Start timer on the
-    // run screen (see practice/[id]/run.tsx → startPracticeTimer).
-    const { error } = await supabase
-      .from("practice_plans")
-      .update({ status: "live", started_at: null })
-      .eq("id", id);
-    setStartingId(null);
-    if (error) {
-      Alert.alert(
-        "Couldn't prep practice",
-        `${error.message}\n\nIf this mentions a constraint, run migration 26 in Supabase first.`
-      );
-      return;
-    }
-    // Land on the plan detail page so coaches can run through the schedule
-    // before kicking off the live timer.
-    router.push(`/practice/${id}` as never);
-  };
-
   const sendLiveToScheduled = (id: string) => {
     lightHaptic();
     Alert.alert(
@@ -1545,6 +1527,7 @@ export default function PracticeListScreen() {
             key={p.id}
             plan={p}
             onPress={() => goToPlan(p.id)}
+            onLive={() => router.push(`/practice/${p.id}/run` as never)}
             onSendToScheduled={() => sendLiveToScheduled(p.id)}
             busy={startingId === p.id}
           />
@@ -1566,7 +1549,7 @@ export default function PracticeListScreen() {
               starting={startingId === groups.nextUp.id}
               duplicating={duplicating}
               onOpen={() => goToPlan(groups.nextUp!.id)}
-              onStart={() => startPractice(groups.nextUp!.id)}
+              onStart={() => goToPlan(groups.nextUp!.id)}
               onEdit={() => goToEdit(groups.nextUp!.id)}
               onDuplicate={() => duplicatePlan(groups.nextUp!.id)}
             />

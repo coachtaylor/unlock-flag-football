@@ -592,22 +592,15 @@ export default function DashboardScreen() {
           <NextPracticeHero
             np={nextPractice}
             teamFormat={teamFormat}
-            onStart={() => {
-              if (!nextPractice) {
-                navigate("/practice/new");
-                return;
-              }
-              const planId = nextPractice.practice_plan_id;
-              // The run screen only opens once a practice is "live" — prepping
-              // it (and marking attendance) happens on the detail page. So jump
-              // straight to the run timer only when it's already live;
-              // otherwise route to the detail page to Prep → Begin.
-              navigate(
-                nextPractice.status === "live"
-                  ? `/practice/${planId}/run`
-                  : `/practice/${planId}`
-              );
-            }}
+            // The prep page (practice detail) is where attendance is marked
+            // and a scheduled practice is flipped to "live". The run screen
+            // only opens once it's live. So "Prepare Practice" / "Review
+            // Practice Prep" route to the detail page; "Live Practice" jumps
+            // straight to the run timer.
+            onLive={() =>
+              nextPractice &&
+              navigate(`/practice/${nextPractice.practice_plan_id}/run`)
+            }
             onAdd={() => navigate("/practice/new")}
             onOpen={() =>
               nextPractice && navigate(`/practice/${nextPractice.practice_plan_id}`)
@@ -704,13 +697,13 @@ export default function DashboardScreen() {
 function NextPracticeHero({
   np,
   teamFormat,
-  onStart,
+  onLive,
   onAdd,
   onOpen,
 }: {
   np: NextPractice;
   teamFormat: string | null;
-  onStart: () => void;
+  onLive: () => void;
   onAdd: () => void;
   onOpen: () => void;
 }) {
@@ -976,56 +969,132 @@ function NextPracticeHero({
         </Pressable>
       </View>
 
-      <View style={{ flexDirection: "row", gap: 8, marginTop: 16 }}>
-        <TouchableOpacity
-          onPress={onStart}
-          activeOpacity={0.92}
-          accessibilityRole="button"
-          accessibilityLabel={isLive ? "Resume practice" : "Start practice"}
-          style={{
-            flex: 1,
-            height: 44,
-            borderRadius: 12,
-            backgroundColor: colors.orange[500],
-            flexDirection: "row",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: 8,
-          }}
-        >
-          <Ionicons name="play-sharp" size={12} color={colors.surface.base} />
-          <Text
-            style={[
-              fontStyle("bold"),
-              {
-                fontSize: 14,
-                fontWeight: fontWeight.bold,
-                color: colors.surface.base,
-              },
-            ]}
+      {isLive ? (
+        // Live: enter the run timer (primary) or jump back to the prep page
+        // to review attendance / the plan (secondary).
+        <View style={{ gap: 8, marginTop: 16 }}>
+          <TouchableOpacity
+            onPress={onLive}
+            activeOpacity={0.92}
+            accessibilityRole="button"
+            accessibilityLabel="Live practice"
+            style={{
+              height: 44,
+              borderRadius: 12,
+              backgroundColor: colors.orange[500],
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+            }}
           >
-            {isLive ? "Resume practice" : "Start practice"}
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={onAdd}
-          activeOpacity={0.85}
-          accessibilityRole="button"
-          accessibilityLabel="Add a practice"
-          style={{
-            width: 44,
-            height: 44,
-            borderRadius: 12,
-            backgroundColor: "rgba(255,255,255,0.04)",
-            borderWidth: 1,
-            borderColor: colors.border.strong,
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <Ionicons name="add" size={16} color={colors.text.primary} />
-        </TouchableOpacity>
-      </View>
+            <Ionicons name="play-sharp" size={12} color={colors.surface.base} />
+            <Text
+              style={[
+                fontStyle("bold"),
+                {
+                  fontSize: 14,
+                  fontWeight: fontWeight.bold,
+                  color: colors.surface.base,
+                },
+              ]}
+            >
+              Live Practice
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={onOpen}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Review practice prep"
+            style={{
+              height: 44,
+              borderRadius: 12,
+              backgroundColor: "rgba(255,255,255,0.04)",
+              borderWidth: 1,
+              borderColor: colors.border.strong,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+            }}
+          >
+            <Ionicons
+              name="clipboard-outline"
+              size={14}
+              color={colors.text.primary}
+            />
+            <Text
+              style={[
+                fontStyle("bold"),
+                {
+                  fontSize: 14,
+                  fontWeight: fontWeight.bold,
+                  color: colors.text.primary,
+                },
+              ]}
+            >
+              Review Practice Prep
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        // Scheduled: open the prep page (attendance + go-live happen there).
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 16 }}>
+          <TouchableOpacity
+            onPress={onOpen}
+            activeOpacity={0.92}
+            accessibilityRole="button"
+            accessibilityLabel="Prepare practice"
+            style={{
+              flex: 1,
+              height: 44,
+              borderRadius: 12,
+              backgroundColor: colors.orange[500],
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+            }}
+          >
+            <Ionicons
+              name="clipboard-outline"
+              size={14}
+              color={colors.surface.base}
+            />
+            <Text
+              style={[
+                fontStyle("bold"),
+                {
+                  fontSize: 14,
+                  fontWeight: fontWeight.bold,
+                  color: colors.surface.base,
+                },
+              ]}
+            >
+              Prepare Practice
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={onAdd}
+            activeOpacity={0.85}
+            accessibilityRole="button"
+            accessibilityLabel="Add a practice"
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 12,
+              backgroundColor: "rgba(255,255,255,0.04)",
+              borderWidth: 1,
+              borderColor: colors.border.strong,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Ionicons name="add" size={16} color={colors.text.primary} />
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   );
 }
