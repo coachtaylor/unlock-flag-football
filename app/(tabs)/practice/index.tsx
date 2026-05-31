@@ -235,33 +235,19 @@ const PLANS_SELECT_CORE =
 
 // ── status pill ─────────────────────────────────────────────────────
 
-const STATUS_META: Record<
-  PlanStatus,
-  { label: string; color: string; bg: string; dashed?: boolean }
-> = {
-  draft: { label: "Draft", color: colors.text.secondary, bg: colors.surface.muted, dashed: true },
-  scheduled: { label: "Scheduled", color: colors.orange[500], bg: colors.orange.tint },
-  live: { label: "Live", color: colors.lime[400], bg: colors.lime.tint },
-  completed: { label: "Completed", color: colors.blue[400], bg: "rgba(110,168,255,0.10)" },
+const STATUS_META: Record<PlanStatus, { label: string; color: string }> = {
+  draft: { label: "Draft", color: colors.text.secondary },
+  scheduled: { label: "Scheduled", color: colors.orange[500] },
+  live: { label: "Live", color: colors.lime[400] },
+  completed: { label: "Completed", color: colors.blue[400] },
 };
 
-function StatusPill({ status, mini }: { status: PlanStatus; mini?: boolean }) {
+// All status badges share the Past Due treatment: plain bold uppercase mono
+// text in the status color, no pill/background. Live keeps a small dot.
+function StatusPill({ status }: { status: PlanStatus }) {
   const m = STATUS_META[status];
   return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 5,
-        paddingHorizontal: mini ? 6 : 8,
-        paddingVertical: mini ? 2 : 3,
-        borderRadius: radius.full,
-        backgroundColor: m.bg,
-        borderWidth: 1,
-        borderStyle: m.dashed ? "dashed" : "solid",
-        borderColor: m.dashed ? colors.border.dashed : `${m.color}33`,
-      }}
-    >
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
       {status === "live" && (
         <View
           style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: m.color }}
@@ -270,7 +256,7 @@ function StatusPill({ status, mini }: { status: PlanStatus; mini?: boolean }) {
       <MonoText
         weight="bold"
         style={{
-          fontSize: mini ? 9 : 10,
+          fontSize: 10,
           color: m.color,
           letterSpacing: 1,
           textTransform: "uppercase",
@@ -865,7 +851,7 @@ function HeroCard({
             style={{ flex: 1, flexDirection: "row", gap: 14 }}
           >
             <DateTile iso={plan.practiceDate} dayOffset={plan.dayOffset} size={64} />
-            <View style={{ flex: 1, gap: 6, minWidth: 0 }}>
+            <View style={{ flex: 1, gap: 8, minWidth: 0 }}>
               <View style={{ flexDirection: "row" }}>
                 <StatusPill status={plan.status} />
               </View>
@@ -930,7 +916,7 @@ function HeroCard({
         </TouchableOpacity>
 
         {/* Actions */}
-        <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
+        <View style={{ flexDirection: "row", gap: 8, marginTop: 18 }}>
           <TouchableOpacity
             activeOpacity={0.85}
             onPress={onStart}
@@ -1058,7 +1044,7 @@ function PlanCard({
       activeOpacity={0.85}
       onPress={onPress}
       style={{
-        padding: spacing.md,
+        padding: spacing.lg,
         backgroundColor: colors.surface.raised,
         borderWidth: 1,
         borderColor: colors.border.card,
@@ -1075,32 +1061,35 @@ function PlanCard({
         size={52}
         pastDue={pastDue}
       />
-      <View style={{ flex: 1, gap: 6, minWidth: 0 }}>
+      <View style={{ flex: 1, gap: 12, minWidth: 0 }}>
+        {/* Top row: status badge (left) · manage (right), kept apart */}
         <View
           style={{
             flexDirection: "row",
             justifyContent: "space-between",
-            alignItems: "flex-start",
-            gap: 8,
+            alignItems: "center",
+            minHeight: 18,
           }}
         >
-          <View style={{ flex: 1, gap: 3, minWidth: 0 }}>
-            <Text
-              style={[
-                fontStyle("semibold"),
-                {
-                  fontSize: 14,
-                  color: plan.title ? colors.text.primary : colors.text.muted,
-                },
-              ]}
-              numberOfLines={1}
-            >
-              {plan.title || "Untitled plan"}
-            </Text>
-            <MetaRow plan={plan} />
-          </View>
-          {pastDue ? <PastDueBadge /> : <StatusPill status={plan.status} mini />}
+          {pastDue ? <PastDueBadge /> : <StatusPill status={plan.status} />}
           {onManage ? <CardManageButton onPress={onManage} /> : null}
+        </View>
+
+        {/* Title + meta */}
+        <View style={{ gap: 4, minWidth: 0 }}>
+          <Text
+            style={[
+              fontStyle("semibold"),
+              {
+                fontSize: 15,
+                color: plan.title ? colors.text.primary : colors.text.muted,
+              },
+            ]}
+            numberOfLines={1}
+          >
+            {plan.title || "Untitled plan"}
+          </Text>
+          <MetaRow plan={plan} />
         </View>
 
         {plan.drills > 0 ? (
