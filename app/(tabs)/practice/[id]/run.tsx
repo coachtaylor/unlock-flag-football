@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   LayoutAnimation,
   Platform,
@@ -26,6 +25,10 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card } from "../../../../components/ui/Card";
 import { Button } from "../../../../components/ui/Button";
 import { PastDueModal } from "../../../../components/ui/PastDueModal";
+import {
+  ActionModal,
+  type ActionModalConfig,
+} from "../../../../components/ui/ActionModal";
 import { colors, radius, spacing } from "../../../../constants/design";
 import { fontStyle, monoStyle } from "../../../../constants/typography";
 import {
@@ -906,6 +909,10 @@ export default function RunPracticeScreen() {
   // practice is stale but still live, so the coach can resume where they
   // left off or close it out by logging.
   const [pastDueOpen, setPastDueOpen] = useState(pastdue === "1");
+  // App-styled modal (replaces native Alert.alert) for confirms + errors.
+  const [modal, setModal] = useState<ActionModalConfig | null>(null);
+  const showError = (title: string, message?: string) =>
+    setModal({ title, message, actions: [], cancelLabel: "OK" });
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1300,7 +1307,7 @@ export default function RunPracticeScreen() {
     lightHaptic();
     const drillId = block[0]?.drillId;
     if (!drillId) {
-      Alert.alert(
+      showError(
         "Missing drill",
         "This block has no underlying drill to benchmark."
       );
@@ -1482,7 +1489,7 @@ export default function RunPracticeScreen() {
       .select("id, note_text, tag, drill_label, created_at")
       .single();
     if (error) {
-      Alert.alert("Couldn't save note", error.message);
+      showError("Couldn't save note", error.message);
       return;
     }
     if (data) {
@@ -1503,17 +1510,18 @@ export default function RunPracticeScreen() {
 
   const endPractice = () => {
     if (!plan) return;
-    Alert.alert(
-      "End practice?",
-      "You'll move to the post-practice log to finalize and save it.",
-      [
-        { text: "Keep running", style: "cancel" },
+    setModal({
+      title: "End practice?",
+      message: "You'll move to the post-practice log to finalize and save it.",
+      cancelLabel: "Keep running",
+      actions: [
         {
-          text: "End & log",
+          label: "End & log",
+          variant: "primary",
           onPress: () => router.push(`/practice/${plan.id}/log` as never),
         },
-      ]
-    );
+      ],
+    });
   };
 
   // --- Render guards --------------------------------------------------------
@@ -2447,6 +2455,12 @@ export default function RunPracticeScreen() {
             },
           },
         ]}
+      />
+
+      <ActionModal
+        open={!!modal}
+        onClose={() => setModal(null)}
+        config={modal}
       />
     </KeyboardAvoidingView>
   );

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Alert,
   Animated,
   Easing,
   LayoutAnimation,
@@ -17,6 +16,10 @@ import { useFocusEffect, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "../../../components/ui/Button";
+import {
+  ActionModal,
+  type ActionModalConfig,
+} from "../../../components/ui/ActionModal";
 import { DeleteConfirmModal } from "../../../components/ui/DeleteConfirmModal";
 import { Eyebrow } from "../../../components/ui/Eyebrow";
 import { colors, radius, spacing } from "../../../constants/design";
@@ -1242,6 +1245,11 @@ export default function PracticeListScreen() {
   // only reachable from the archive, behind a type-the-name confirm.
   const [deleteTarget, setDeleteTarget] = useState<PlanVM | null>(null);
   const [deleting, setDeleting] = useState(false);
+  // App-styled modal (replaces native Alert.alert): drives confirms, the
+  // per-card manage menu, and error messages from one config slot.
+  const [modal, setModal] = useState<ActionModalConfig | null>(null);
+  const showError = (title: string, message?: string) =>
+    setModal({ title, message, actions: [], cancelLabel: "OK" });
   // Collapsed section keys (view-only state, like the detail page's
   // expandable drill rows — not persisted).
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -1383,13 +1391,13 @@ export default function PracticeListScreen() {
 
   const sendLiveToScheduled = (id: string) => {
     lightHaptic();
-    Alert.alert(
-      "Move back to scheduled?",
-      "The practice will no longer show as live. Per-drill timing is preserved — re-starting will reset it for a fresh run.",
-      [
-        { text: "Cancel", style: "cancel" },
+    setModal({
+      title: "Move back to scheduled?",
+      message:
+        "The practice will no longer show as live. Per-drill timing is preserved — re-starting will reset it for a fresh run.",
+      actions: [
         {
-          text: "Move",
+          label: "Move",
           onPress: async () => {
             setStartingId(id);
             const { error } = await supabase
@@ -1398,14 +1406,14 @@ export default function PracticeListScreen() {
               .eq("id", id);
             setStartingId(null);
             if (error) {
-              Alert.alert("Couldn't move practice", error.message);
+              showError("Couldn't move practice", error.message);
               return;
             }
             await load();
           },
         },
-      ]
-    );
+      ],
+    });
   };
 
   // Run a lifecycle mutation (delete / archive / unarchive) then reload.
@@ -1419,7 +1427,7 @@ export default function PracticeListScreen() {
       ? await q.update(patch).eq("id", plan.id)
       : await q.delete().eq("id", plan.id);
     if (error) {
-      Alert.alert(`Couldn't ${label} practice`, error.message);
+      showError(`Couldn't ${label} practice`, error.message);
       return;
     }
     await load();
@@ -1432,31 +1440,31 @@ export default function PracticeListScreen() {
   // folds its old duplicate icon into this menu).
   const openPlanMenu = (plan: PlanVM, opts?: { duplicate?: boolean }) => {
     lightHaptic();
-    const buttons: Parameters<typeof Alert.alert>[2] = [];
+    const actions: ActionModalConfig["actions"] = [];
     if (opts?.duplicate) {
-      buttons!.push({ text: "Duplicate", onPress: () => duplicatePlan(plan.id) });
+      actions.push({ label: "Duplicate", onPress: () => duplicatePlan(plan.id) });
     }
-    let warn: string | undefined;
+    let message: string | undefined;
     if (plan.archived) {
-      buttons!.push({
-        text: "Unarchive",
+      actions.push({
+        label: "Unarchive",
         onPress: () => doManage(plan, { archived_at: null }, "unarchive"),
       });
-      buttons!.push({
-        text: "Delete",
-        style: "destructive",
+      actions.push({
+        label: "Delete",
+        variant: "destructive",
         onPress: () => setDeleteTarget(plan),
       });
     } else {
-      warn = "Practices are archived, not deleted — all data is kept. You can delete it permanently later from the archive.";
-      buttons!.push({
-        text: "Archive",
+      message =
+        "Practices are archived, not deleted — all data is kept. You can delete it permanently later from the archive.";
+      actions.push({
+        label: "Archive",
         onPress: () =>
           doManage(plan, { archived_at: new Date().toISOString() }, "archive"),
       });
     }
-    buttons!.push({ text: "Cancel", style: "cancel" });
-    Alert.alert(plan.title ?? "Practice", warn, buttons);
+    setModal({ title: plan.title ?? "Practice", message, actions });
   };
 
   // Duplicate a plan into a fresh independent draft, then open it for editing.
@@ -1475,7 +1483,7 @@ export default function PracticeListScreen() {
         .eq("id", planId)
         .maybeSingle();
       if (origErr || !orig) {
-        Alert.alert(
+        showError(
           "Couldn't duplicate",
           origErr?.message ?? "Practice plan not found."
         );
@@ -1496,7 +1504,7 @@ export default function PracticeListScreen() {
         .select("id")
         .single();
       if (createErr || !created) {
-        Alert.alert(
+        showError(
           "Couldn't duplicate",
           createErr?.message ?? "Could not create the copy."
         );
@@ -1536,7 +1544,7 @@ export default function PracticeListScreen() {
           ).error;
         }
         if (insErr) {
-          Alert.alert("Couldn't duplicate", insErr.message);
+          showError("Couldn't duplicate", insErr.message);
           return;
         }
       }
@@ -1883,6 +1891,12 @@ export default function PracticeListScreen() {
           </>
         )}
       </ScrollView>
+
+      <ActionModal
+        open={!!modal}
+        onClose={() => setModal(null)}
+        config={modal}
+      />
 
       <DeleteConfirmModal
         open={!!deleteTarget}

@@ -1,7 +1,6 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   LayoutAnimation,
   Platform,
   Pressable,
@@ -28,6 +27,10 @@ import { Button } from "../../../../components/ui/Button";
 import { Eyebrow } from "../../../../components/ui/Eyebrow";
 import { PastDueModal } from "../../../../components/ui/PastDueModal";
 import { DeleteConfirmModal } from "../../../../components/ui/DeleteConfirmModal";
+import {
+  ActionModal,
+  type ActionModalConfig,
+} from "../../../../components/ui/ActionModal";
 import {
   PracticeAttendanceSheet,
   type AttendancePlayer,
@@ -506,6 +509,10 @@ export default function PracticePlanDetailScreen() {
   const [pastDueOpen, setPastDueOpen] = useState(pastdue === "1");
   // Permanent-delete confirm (archived plans only) — type-the-name gate.
   const [deleteOpen, setDeleteOpen] = useState(false);
+  // App-styled modal (replaces native Alert.alert) for confirms + errors.
+  const [modal, setModal] = useState<ActionModalConfig | null>(null);
+  const showError = (title: string, message?: string) =>
+    setModal({ title, message, actions: [], cancelLabel: "OK" });
   const [log, setLog] = useState<PracticeLog | null>(null);
   const [busy, setBusy] = useState(false);
   const [attendancePlayers, setAttendancePlayers] = useState<
@@ -926,13 +933,14 @@ export default function PracticePlanDetailScreen() {
 
   const finalize = () => {
     if (!plan) return;
-    Alert.alert(
-      "Finalize plan?",
-      "Finalizing schedules the practice and unlocks Prep Practice on practice day.",
-      [
-        { text: "Cancel", style: "cancel" },
+    setModal({
+      title: "Finalize plan?",
+      message:
+        "Finalizing schedules the practice and unlocks Prep Practice on practice day.",
+      actions: [
         {
-          text: "Finalize",
+          label: "Finalize",
+          variant: "primary",
           onPress: async () => {
             setBusy(true);
             const { error } = await supabase
@@ -941,14 +949,14 @@ export default function PracticePlanDetailScreen() {
               .eq("id", plan.id);
             setBusy(false);
             if (error) {
-              Alert.alert("Couldn't finalize", error.message);
+              showError("Couldn't finalize", error.message);
               return;
             }
             await load();
           },
         },
-      ]
-    );
+      ],
+    });
   };
 
   // --- Check-in handlers (lifted from run.tsx so coaches can mark players
@@ -1041,13 +1049,13 @@ export default function PracticePlanDetailScreen() {
 
   const sendLiveToScheduled = () => {
     if (!plan) return;
-    Alert.alert(
-      "Move back to scheduled?",
-      "The practice will no longer show as live. Per-drill timing is preserved — re-starting will reset it for a fresh run.",
-      [
-        { text: "Cancel", style: "cancel" },
+    setModal({
+      title: "Move back to scheduled?",
+      message:
+        "The practice will no longer show as live. Per-drill timing is preserved — re-starting will reset it for a fresh run.",
+      actions: [
         {
-          text: "Move",
+          label: "Move",
           onPress: async () => {
             setBusy(true);
             const { error } = await supabase
@@ -1056,25 +1064,26 @@ export default function PracticePlanDetailScreen() {
               .eq("id", plan.id);
             setBusy(false);
             if (error) {
-              Alert.alert("Couldn't move practice", error.message);
+              showError("Couldn't move practice", error.message);
               return;
             }
             await load();
           },
         },
-      ]
-    );
+      ],
+    });
   };
 
   const startPractice = () => {
     if (!plan) return;
-    Alert.alert(
-      "Start Practice?",
-      "This marks the practice as live so the team knows it's underway. Per-drill timing resets for a fresh run; tap Live Practice when you're ready to start the timer.",
-      [
-        { text: "Cancel", style: "cancel" },
+    setModal({
+      title: "Start Practice?",
+      message:
+        "This marks the practice as live so the team knows it's underway. Per-drill timing resets for a fresh run; tap Live Practice when you're ready to start the timer.",
+      actions: [
         {
-          text: "Start",
+          label: "Start",
+          variant: "primary",
           onPress: async () => {
             setBusy(true);
             // Prep Practice marks the plan live but does NOT start the
@@ -1086,7 +1095,7 @@ export default function PracticePlanDetailScreen() {
               .eq("id", plan.id);
             if (error) {
               setBusy(false);
-              Alert.alert(
+              showError(
                 "Couldn't prep practice",
                 `${error.message}\n\nIf this mentions a constraint, run migration 26 in Supabase first.`
               );
@@ -1108,8 +1117,8 @@ export default function PracticePlanDetailScreen() {
             await load();
           },
         },
-      ]
-    );
+      ],
+    });
   };
 
   // Permanent delete. Only reachable for already-archived plans, and only
@@ -1124,7 +1133,7 @@ export default function PracticePlanDetailScreen() {
       .eq("id", plan.id);
     setBusy(false);
     if (error) {
-      Alert.alert("Couldn't delete practice", error.message);
+      showError("Couldn't delete practice", error.message);
       return;
     }
     setDeleteOpen(false);
@@ -1138,13 +1147,13 @@ export default function PracticePlanDetailScreen() {
   // lists. Deleting for good is a second step, available only once archived.
   const archivePlan = () => {
     if (!plan) return;
-    Alert.alert(
-      "Archive practice?",
-      "It moves to your Archived list and out of the active practice views. You can unarchive it later.",
-      [
-        { text: "Cancel", style: "cancel" },
+    setModal({
+      title: "Archive practice?",
+      message:
+        "It moves to your Archived list and out of the active practice views. You can unarchive it later.",
+      actions: [
         {
-          text: "Archive",
+          label: "Archive",
           onPress: async () => {
             setBusy(true);
             const { error } = await supabase
@@ -1153,15 +1162,15 @@ export default function PracticePlanDetailScreen() {
               .eq("id", plan.id);
             setBusy(false);
             if (error) {
-              Alert.alert("Couldn't archive practice", error.message);
+              showError("Couldn't archive practice", error.message);
               return;
             }
             setPastDueOpen(false);
             router.back();
           },
         },
-      ]
-    );
+      ],
+    });
   };
 
   const unarchivePlan = async () => {
@@ -1173,7 +1182,7 @@ export default function PracticePlanDetailScreen() {
       .eq("id", plan.id);
     setBusy(false);
     if (error) {
-      Alert.alert("Couldn't unarchive practice", error.message);
+      showError("Couldn't unarchive practice", error.message);
       return;
     }
     await load();
@@ -2327,6 +2336,12 @@ export default function PracticePlanDetailScreen() {
         title={plan.title}
         busy={busy}
         onConfirm={deletePlan}
+      />
+
+      <ActionModal
+        open={!!modal}
+        onClose={() => setModal(null)}
+        config={modal}
       />
     </View>
   );
