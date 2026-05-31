@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  Alert,
   Modal,
   Pressable,
   ScrollView,
@@ -14,6 +13,10 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AthleteHero } from "../../../../components/ui/AthleteHero";
 import { Button } from "../../../../components/ui/Button";
+import {
+  ActionModal,
+  useActionModal,
+} from "../../../../components/ui/ActionModal";
 import {
   colors,
   fontWeight,
@@ -105,6 +108,8 @@ export default function PlayerDetailScreen() {
   const [grouped, setGrouped] = useState<GroupedDrill[]>([]);
   const [observations, setObservations] = useState<ObservationRow[]>([]);
   const [busy, setBusy] = useState(false);
+  // App-styled confirm/error modal (replaces native Alert.alert).
+  const { show: showModal, showError, modalProps } = useActionModal();
 
   const load = useCallback(async () => {
     if (!id) return;
@@ -265,7 +270,7 @@ export default function PlayerDetailScreen() {
     setBusy(false);
     setInjuryModalOpen(false);
     if (error) {
-      Alert.alert(
+      showError(
         "Couldn't update player",
         /is_injured|injury_note/i.test(error.message)
           ? "Database is missing the injury columns. Apply migration 43."
@@ -280,16 +285,16 @@ export default function PlayerDetailScreen() {
     if (!player) return;
     const next = player.status === "active" ? "inactive" : "active";
     const verb = next === "inactive" ? "Deactivate" : "Reactivate";
-    Alert.alert(
-      `${verb} player?`,
-      next === "inactive"
-        ? "They'll be moved to the inactive list. Their data is kept."
-        : "They'll move back to the active roster.",
-      [
-        { text: "Cancel", style: "cancel" },
+    showModal({
+      title: `${verb} player?`,
+      message:
+        next === "inactive"
+          ? "They'll be moved to the inactive list. Their data is kept."
+          : "They'll move back to the active roster.",
+      actions: [
         {
-          text: verb,
-          style: next === "inactive" ? "destructive" : "default",
+          label: verb,
+          variant: next === "inactive" ? "destructive" : "primary",
           onPress: async () => {
             setBusy(true);
             const { error } = await supabase
@@ -298,14 +303,14 @@ export default function PlayerDetailScreen() {
               .eq("id", player.id);
             setBusy(false);
             if (error) {
-              Alert.alert("Couldn't update player", error.message);
+              showError("Couldn't update player", error.message);
               return;
             }
             await load();
           },
         },
-      ]
-    );
+      ],
+    });
   };
 
   if (loading) {
@@ -1075,6 +1080,8 @@ export default function PlayerDetailScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      <ActionModal {...modalProps} />
     </View>
   );
 }

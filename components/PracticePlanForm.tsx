@@ -1,6 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -21,6 +20,7 @@ import DateTimePicker, {
   type DateTimePickerEvent,
 } from "@react-native-community/datetimepicker";
 import { Button } from "./ui/Button";
+import { ActionModal, useActionModal } from "./ui/ActionModal";
 import { Eyebrow } from "./ui/Eyebrow";
 import { AvatarStack } from "./ui/AvatarStack";
 import { DrillNoteHistorySheet } from "./DrillNoteHistorySheet";
@@ -3610,6 +3610,8 @@ export function PracticePlanForm({
   const [endPickerOpen, setEndPickerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // App-styled confirm/error modal (replaces native Alert.alert).
+  const { show: showModal, showError, modalProps } = useActionModal();
 
   useFocusEffect(
     useCallback(() => {
@@ -4613,14 +4615,14 @@ export function PracticePlanForm({
   const handleDelete = () => {
     if (!initial) return;
     const planId = initial.id;
-    Alert.alert(
-      "Delete this practice plan?",
-      "This removes the plan and its drill schedule for the whole team. This can't be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
+    showModal({
+      title: "Delete this practice plan?",
+      message:
+        "This removes the plan and its drill schedule for the whole team. This can't be undone.",
+      actions: [
         {
-          text: "Delete",
-          style: "destructive",
+          label: "Delete",
+          variant: "destructive",
           onPress: async () => {
             setSubmitting(true);
             const { data: deleted, error: delErr } = await supabase
@@ -4630,7 +4632,7 @@ export function PracticePlanForm({
               .select("id");
             if (delErr || !deleted || deleted.length === 0) {
               setSubmitting(false);
-              Alert.alert(
+              showError(
                 "Couldn't delete",
                 delErr?.message ??
                   "The plan couldn't be deleted. The latest database migration may not be applied yet."
@@ -4640,8 +4642,8 @@ export function PracticePlanForm({
             router.replace("/practice" as never);
           },
         },
-      ]
-    );
+      ],
+    });
   };
 
   return (
@@ -5229,18 +5231,18 @@ export function PracticePlanForm({
                         removePlanBlock(pb.localId);
                         return;
                       }
-                      Alert.alert(
-                        `Remove "${pb.name}"?`,
-                        "This will remove every drill in this block from the practice. The drills stay in your library.",
-                        [
-                          { text: "Cancel", style: "cancel" },
+                      showModal({
+                        title: `Remove "${pb.name}"?`,
+                        message:
+                          "This will remove every drill in this block from the practice. The drills stay in your library.",
+                        actions: [
                           {
-                            text: "Remove",
-                            style: "destructive",
+                            label: "Remove",
+                            variant: "destructive",
                             onPress: () => removePlanBlock(pb.localId),
                           },
-                        ]
-                      );
+                        ],
+                      });
                     }}
                     onRename={(name) => updateBlockName(pb.localId, name)}
                     onChangeTarget={(mins) => updateBlockTarget(pb.localId, mins)}
@@ -5703,6 +5705,8 @@ export function PracticePlanForm({
           setMoveSheet(null);
         }}
       />
+
+      <ActionModal {...modalProps} />
     </KeyboardAvoidingView>
   );
 }

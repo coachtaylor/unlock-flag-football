@@ -27,10 +27,7 @@ import { Button } from "../../../../components/ui/Button";
 import { Eyebrow } from "../../../../components/ui/Eyebrow";
 import { PastDueModal } from "../../../../components/ui/PastDueModal";
 import { DeleteConfirmModal } from "../../../../components/ui/DeleteConfirmModal";
-import {
-  ActionModal,
-  type ActionModalConfig,
-} from "../../../../components/ui/ActionModal";
+import { ActionModal, useActionModal } from "../../../../components/ui/ActionModal";
 import {
   PracticeAttendanceSheet,
   type AttendancePlayer,
@@ -510,9 +507,7 @@ export default function PracticePlanDetailScreen() {
   // Permanent-delete confirm (archived plans only) — type-the-name gate.
   const [deleteOpen, setDeleteOpen] = useState(false);
   // App-styled modal (replaces native Alert.alert) for confirms + errors.
-  const [modal, setModal] = useState<ActionModalConfig | null>(null);
-  const showError = (title: string, message?: string) =>
-    setModal({ title, message, actions: [], cancelLabel: "OK" });
+  const { show: showModal, showError, modalProps } = useActionModal();
   const [log, setLog] = useState<PracticeLog | null>(null);
   const [busy, setBusy] = useState(false);
   const [attendancePlayers, setAttendancePlayers] = useState<
@@ -933,7 +928,7 @@ export default function PracticePlanDetailScreen() {
 
   const finalize = () => {
     if (!plan) return;
-    setModal({
+    showModal({
       title: "Finalize plan?",
       message:
         "Finalizing schedules the practice and unlocks Prep Practice on practice day.",
@@ -1049,7 +1044,7 @@ export default function PracticePlanDetailScreen() {
 
   const sendLiveToScheduled = () => {
     if (!plan) return;
-    setModal({
+    showModal({
       title: "Move back to scheduled?",
       message:
         "The practice will no longer show as live. Per-drill timing is preserved — re-starting will reset it for a fresh run.",
@@ -1076,7 +1071,7 @@ export default function PracticePlanDetailScreen() {
 
   const startPractice = () => {
     if (!plan) return;
-    setModal({
+    showModal({
       title: "Start Practice?",
       message:
         "This marks the practice as live so the team knows it's underway. Per-drill timing resets for a fresh run; tap Live Practice when you're ready to start the timer.",
@@ -1147,7 +1142,7 @@ export default function PracticePlanDetailScreen() {
   // lists. Deleting for good is a second step, available only once archived.
   const archivePlan = () => {
     if (!plan) return;
-    setModal({
+    showModal({
       title: "Archive practice?",
       message:
         "It moves to your Archived list and out of the active practice views. You can unarchive it later.",
@@ -2338,11 +2333,7 @@ export default function PracticePlanDetailScreen() {
         onConfirm={deletePlan}
       />
 
-      <ActionModal
-        open={!!modal}
-        onClose={() => setModal(null)}
-        config={modal}
-      />
+      <ActionModal {...modalProps} />
     </View>
   );
 }

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Modal,
   Platform,
   Pressable,
@@ -23,6 +22,7 @@ import {
 import { supabase } from "../../../lib/supabase";
 import { useTeam } from "../../../lib/team-context";
 import { Eyebrow } from "../../../components/ui/Eyebrow";
+import { ActionModal, useActionModal } from "../../../components/ui/ActionModal";
 
 // ─────────────────────────────────────────────────────────────────────
 // Types
@@ -83,6 +83,8 @@ export default function LeagueDashboardScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { availableTeams, selectTeam, refreshTeam } = useTeam();
+  // App-styled confirm/error modal (replaces native Alert.alert).
+  const { show: showModal, showError, modalProps } = useActionModal();
   const { leagueId } = useLocalSearchParams<{ leagueId: string }>();
 
   const [loading, setLoading] = useState(true);
@@ -238,21 +240,21 @@ export default function LeagueDashboardScreen() {
   // child table wipe the team's data atomically.
   const confirmDeleteTeam = useCallback(
     (team: LeagueTeam) => {
-      Alert.alert(
-        `Delete ${team.name}?`,
-        "This wipes the team, its roster, drills, practices, benchmarks, and notes. This can't be undone.",
-        [
-          { text: "Cancel", style: "cancel" },
+      showModal({
+        title: `Delete ${team.name}?`,
+        message:
+          "This wipes the team, its roster, drills, practices, benchmarks, and notes. This can't be undone.",
+        actions: [
           {
-            text: "Delete",
-            style: "destructive",
+            label: "Delete",
+            variant: "destructive",
             onPress: async () => {
               const { error } = await supabase
                 .from("teams")
                 .delete()
                 .eq("id", team.id);
               if (error) {
-                Alert.alert("Couldn't delete team", error.message);
+                showError("Couldn't delete team", error.message);
                 return;
               }
               // Refresh the league's team list AND the team context (so
@@ -261,9 +263,9 @@ export default function LeagueDashboardScreen() {
             },
           },
         ],
-      );
+      });
     },
-    [load, refreshTeam],
+    [load, refreshTeam, showModal, showError],
   );
 
   // League not found OR user lacks access — show a small fallback.
@@ -551,6 +553,7 @@ export default function LeagueDashboardScreen() {
         }}
       />
 
+      <ActionModal {...modalProps} />
     </View>
   );
 }

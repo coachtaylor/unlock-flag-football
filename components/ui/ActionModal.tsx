@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback, useState } from "react";
 import { Modal, Pressable, Text, View } from "react-native";
 import { Button } from "./Button";
 import { colors, radius, spacing } from "../../constants/design";
@@ -19,6 +19,28 @@ export type ActionModalConfig = {
   actions: ModalAction[];
   cancelLabel?: string;
 };
+
+// Single canonical hook for every styled confirm / action-sheet / error
+// modal. Encapsulates the config state, a `show()` opener, a `showError()`
+// shortcut (title + message + just an OK dismiss), and the props to spread
+// straight into <ActionModal {...modalProps} />. Use this instead of
+// re-declaring useState + a showError in each screen (DRY).
+export function useActionModal() {
+  const [config, setConfig] = useState<ActionModalConfig | null>(null);
+  const show = useCallback((c: ActionModalConfig) => setConfig(c), []);
+  const close = useCallback(() => setConfig(null), []);
+  const showError = useCallback(
+    (title: string, message?: string) =>
+      setConfig({ title, message, actions: [], cancelLabel: "OK" }),
+    []
+  );
+  return {
+    show,
+    showError,
+    close,
+    modalProps: { open: !!config, onClose: close, config },
+  };
+}
 
 // App-styled replacement for the native iOS Alert.alert / action sheet.
 // Centered dark card matching PastDueModal / DeleteConfirmModal: optional

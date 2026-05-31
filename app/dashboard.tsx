@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   RefreshControl,
   ScrollView,
   Text,
@@ -24,6 +23,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth-context";
 import { useTeam } from "../lib/team-context";
 import { Eyebrow } from "../components/ui/Eyebrow";
+import { ActionModal, useActionModal } from "../components/ui/ActionModal";
 import { BackfillModal, shouldShowBackfill } from "../components/BackfillModal";
 
 // ─────────────────────────────────────────────────────────────────────
@@ -318,6 +318,8 @@ export default function UserDashboardScreen() {
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
   const { selectTeam, refreshTeam } = useTeam();
+  // App-styled confirm/error modal (replaces native Alert.alert).
+  const { show: showModal, showError, modalProps } = useActionModal();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -381,21 +383,21 @@ export default function UserDashboardScreen() {
   // from migration 57 gates who can do it.
   const confirmDeleteTeam = useCallback(
     (team: TeamRow) => {
-      Alert.alert(
-        `Delete ${team.name}?`,
-        "This wipes the team, its roster, drills, practices, benchmarks, and notes. This can't be undone.",
-        [
-          { text: "Cancel", style: "cancel" },
+      showModal({
+        title: `Delete ${team.name}?`,
+        message:
+          "This wipes the team, its roster, drills, practices, benchmarks, and notes. This can't be undone.",
+        actions: [
           {
-            text: "Delete",
-            style: "destructive",
+            label: "Delete",
+            variant: "destructive",
             onPress: async () => {
               const { error } = await supabase
                 .from("teams")
                 .delete()
                 .eq("id", team.id);
               if (error) {
-                Alert.alert("Couldn't delete team", error.message);
+                showError("Couldn't delete team", error.message);
                 return;
               }
               // Refresh dashboard list AND the team context (so the
@@ -405,9 +407,9 @@ export default function UserDashboardScreen() {
             },
           },
         ],
-      );
+      });
     },
-    [load, refreshTeam],
+    [load, refreshTeam, showModal, showError],
   );
 
   const isEmpty = leagues.length === 0 && teams.length === 0;
@@ -647,6 +649,8 @@ export default function UserDashboardScreen() {
           }}
         />
       ) : null}
+
+      <ActionModal {...modalProps} />
     </View>
   );
 }

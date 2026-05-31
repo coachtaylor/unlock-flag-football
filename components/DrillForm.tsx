@@ -1,7 +1,6 @@
 import { useLocalSearchParams } from "expo-router";
 import { useMemo, useRef, useState } from "react";
 import {
-  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -17,6 +16,7 @@ import { useRouter } from "expo-router";
 import Svg, { Circle } from "react-native-svg";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "./ui/Button";
+import { ActionModal, useActionModal } from "./ui/ActionModal";
 import { TextArea } from "./ui/TextArea";
 import {
   CATEGORY_COLORS,
@@ -171,6 +171,9 @@ export function DrillForm({
       : null;
   const { user } = useAuth();
   const isEditing = !!initial;
+
+  // App-styled validation/error modal (replaces native Alert.alert).
+  const { showError, modalProps } = useActionModal();
 
   const [drillName, setDrillName] = useState(initial?.drillName ?? "");
   // "02 Phase" now holds only phase categories — the old Skill/Sub-skill
@@ -393,18 +396,17 @@ export function DrillForm({
 
     if (missing.length > 0) {
       const verb = targetStatus === "published" ? "publish" : "save";
-      Alert.alert(
+      showError(
         targetStatus === "published"
           ? "Can't publish drill"
           : "Can't save drill",
-        `Please add the following before you ${verb}:\n\n• ${missing.join("\n• ")}`,
-        [{ text: "OK" }]
+        `Please add the following before you ${verb}:\n\n• ${missing.join("\n• ")}`
       );
       return null;
     }
 
     if (!user) {
-      Alert.alert("Not logged in", "You must be logged in to save a drill.");
+      showError("Not logged in", "You must be logged in to save a drill.");
       return null;
     }
 
@@ -521,14 +523,14 @@ export function DrillForm({
     if (isEditing && initial) {
       const res = await tryWriteWithDrift(payload);
       if (res.error) {
-        Alert.alert("Couldn't save drill", res.error.message);
+        showError("Couldn't save drill", res.error.message);
         return null;
       }
       drillId = initial.id;
     } else {
       const res = await tryWriteWithDrift(payload);
       if (res.error || !res.data?.id) {
-        Alert.alert(
+        showError(
           "Couldn't save drill",
           res.error?.message ?? "Could not create drill."
         );
@@ -542,7 +544,7 @@ export function DrillForm({
       .delete()
       .eq("drill_id", drillId);
     if (deleteCatErr) {
-      Alert.alert("Couldn't save categories", deleteCatErr.message);
+      showError("Couldn't save categories", deleteCatErr.message);
       return null;
     }
     if (categoryIds.length > 0) {
@@ -552,7 +554,7 @@ export function DrillForm({
           categoryIds.map((cid) => ({ drill_id: drillId, category_id: cid }))
         );
       if (insertCatErr) {
-        Alert.alert("Couldn't save categories", insertCatErr.message);
+        showError("Couldn't save categories", insertCatErr.message);
         return null;
       }
     }
@@ -566,7 +568,7 @@ export function DrillForm({
         .delete()
         .eq("drill_id", drillId);
       if (deleteSkillErr) {
-        Alert.alert("Couldn't save skill tags", deleteSkillErr.message);
+        showError("Couldn't save skill tags", deleteSkillErr.message);
         return null;
       }
       // Persist only skills whose group the chosen phase actually offers, so
@@ -583,7 +585,7 @@ export function DrillForm({
           .from("drill_skills")
           .insert(skillRows);
         if (insertSkillErr) {
-          Alert.alert("Couldn't save skill tags", insertSkillErr.message);
+          showError("Couldn't save skill tags", insertSkillErr.message);
           return null;
         }
       }
@@ -1529,6 +1531,8 @@ export function DrillForm({
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      <ActionModal {...modalProps} />
     </KeyboardAvoidingView>
   );
 }

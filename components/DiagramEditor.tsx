@@ -7,7 +7,6 @@ import {
   useState,
 } from "react";
 import {
-  Alert,
   PanResponder,
   Pressable,
   Text,
@@ -40,6 +39,7 @@ import type {
   RouteWaypoint,
 } from "../types/diagram";
 import { colors, radius, spacing } from "../constants/design";
+import { ActionModal, useActionModal } from "./ui/ActionModal";
 
 export type DiagramSelectionInfo = {
   kind: "cone" | "qb" | "football" | "route";
@@ -434,6 +434,9 @@ function DiagramEditorInner(
       ballPaths: value.ballPaths ?? [],
     }
     : emptyDiagram();
+
+  // App-styled confirm modal (replaces native Alert.alert).
+  const { show: showModal, modalProps } = useActionModal();
 
   const [mode, setMode] = useState<Mode>("normal");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -1221,14 +1224,14 @@ function DiagramEditorInner(
   };
 
   const handleClearAll = () => {
-    Alert.alert(
-      "Clear diagram?",
-      "This will remove all cones, routes, and paths. This can't be undone.",
-      [
-        { text: "Cancel", style: "cancel" },
+    showModal({
+      title: "Clear diagram?",
+      message:
+        "This will remove all cones, routes, and paths. This can't be undone.",
+      actions: [
         {
-          text: "Delete",
-          style: "destructive",
+          label: "Delete",
+          variant: "destructive",
           onPress: () => {
             update({ ...data, cones: [], paths: [], routes: [], ballPaths: [] });
             setSelectedId(null);
@@ -1240,8 +1243,8 @@ function DiagramEditorInner(
             setMode("normal");
           },
         },
-      ]
-    );
+      ],
+    });
   };
 
   const coneById = new Map(data.cones.map((c) => [c.id, c]));
@@ -1978,6 +1981,8 @@ function DiagramEditorInner(
           </View>
         )}
       </View>
+
+      <ActionModal {...modalProps} />
     </View>
   );
 }

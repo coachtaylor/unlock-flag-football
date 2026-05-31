@@ -25,10 +25,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card } from "../../../../components/ui/Card";
 import { Button } from "../../../../components/ui/Button";
 import { PastDueModal } from "../../../../components/ui/PastDueModal";
-import {
-  ActionModal,
-  type ActionModalConfig,
-} from "../../../../components/ui/ActionModal";
+import { ActionModal, useActionModal } from "../../../../components/ui/ActionModal";
 import { colors, radius, spacing } from "../../../../constants/design";
 import { fontStyle, monoStyle } from "../../../../constants/typography";
 import {
@@ -910,9 +907,7 @@ export default function RunPracticeScreen() {
   // left off or close it out by logging.
   const [pastDueOpen, setPastDueOpen] = useState(pastdue === "1");
   // App-styled modal (replaces native Alert.alert) for confirms + errors.
-  const [modal, setModal] = useState<ActionModalConfig | null>(null);
-  const showError = (title: string, message?: string) =>
-    setModal({ title, message, actions: [], cancelLabel: "OK" });
+  const { show: showModal, showError, modalProps } = useActionModal();
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1510,7 +1505,7 @@ export default function RunPracticeScreen() {
 
   const endPractice = () => {
     if (!plan) return;
-    setModal({
+    showModal({
       title: "End practice?",
       message: "You'll move to the post-practice log to finalize and save it.",
       cancelLabel: "Keep running",
@@ -2457,11 +2452,7 @@ export default function RunPracticeScreen() {
         ]}
       />
 
-      <ActionModal
-        open={!!modal}
-        onClose={() => setModal(null)}
-        config={modal}
-      />
+      <ActionModal {...modalProps} />
     </KeyboardAvoidingView>
   );
 }

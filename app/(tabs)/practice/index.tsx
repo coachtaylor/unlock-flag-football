@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "../../../components/ui/Button";
 import {
   ActionModal,
+  useActionModal,
   type ActionModalConfig,
 } from "../../../components/ui/ActionModal";
 import { DeleteConfirmModal } from "../../../components/ui/DeleteConfirmModal";
@@ -1246,10 +1247,8 @@ export default function PracticeListScreen() {
   const [deleteTarget, setDeleteTarget] = useState<PlanVM | null>(null);
   const [deleting, setDeleting] = useState(false);
   // App-styled modal (replaces native Alert.alert): drives confirms, the
-  // per-card manage menu, and error messages from one config slot.
-  const [modal, setModal] = useState<ActionModalConfig | null>(null);
-  const showError = (title: string, message?: string) =>
-    setModal({ title, message, actions: [], cancelLabel: "OK" });
+  // per-card manage menu, and error messages from one shared hook.
+  const { show: showModal, showError, modalProps } = useActionModal();
   // Collapsed section keys (view-only state, like the detail page's
   // expandable drill rows — not persisted).
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -1391,7 +1390,7 @@ export default function PracticeListScreen() {
 
   const sendLiveToScheduled = (id: string) => {
     lightHaptic();
-    setModal({
+    showModal({
       title: "Move back to scheduled?",
       message:
         "The practice will no longer show as live. Per-drill timing is preserved — re-starting will reset it for a fresh run.",
@@ -1464,7 +1463,7 @@ export default function PracticeListScreen() {
           doManage(plan, { archived_at: new Date().toISOString() }, "archive"),
       });
     }
-    setModal({ title: plan.title ?? "Practice", message, actions });
+    showModal({ title: plan.title ?? "Practice", message, actions });
   };
 
   // Duplicate a plan into a fresh independent draft, then open it for editing.
@@ -1892,11 +1891,7 @@ export default function PracticeListScreen() {
         )}
       </ScrollView>
 
-      <ActionModal
-        open={!!modal}
-        onClose={() => setModal(null)}
-        config={modal}
-      />
+      <ActionModal {...modalProps} />
 
       <DeleteConfirmModal
         open={!!deleteTarget}
