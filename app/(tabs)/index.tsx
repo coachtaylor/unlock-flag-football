@@ -593,11 +593,20 @@ export default function DashboardScreen() {
             np={nextPractice}
             teamFormat={teamFormat}
             onStart={() => {
-              if (nextPractice) {
-                navigate(`/practice/${nextPractice.practice_plan_id}/run`);
-              } else {
+              if (!nextPractice) {
                 navigate("/practice/new");
+                return;
               }
+              const planId = nextPractice.practice_plan_id;
+              // The run screen only opens once a practice is "live" — prepping
+              // it (and marking attendance) happens on the detail page. So jump
+              // straight to the run timer only when it's already live;
+              // otherwise route to the detail page to Prep → Begin.
+              navigate(
+                nextPractice.status === "live"
+                  ? `/practice/${planId}/run`
+                  : `/practice/${planId}`
+              );
             }}
             onAdd={() => navigate("/practice/new")}
             onOpen={() =>
