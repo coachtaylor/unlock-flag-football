@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Alert,
   PanResponder,
@@ -11,13 +18,16 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import Svg, {
   Circle,
+  Defs,
   Ellipse,
   G,
   Line,
+  LinearGradient,
   Path as SvgPath,
   Polygon,
   Polyline,
   Rect,
+  Stop,
   Text as SvgText,
 } from "react-native-svg";
 import type {
@@ -31,10 +41,27 @@ import type {
 } from "../types/diagram";
 import { colors, radius, spacing } from "../constants/design";
 
+export type DiagramSelectionInfo = {
+  kind: "cone" | "qb" | "football" | "route";
+  label: string;
+} | null;
+
+export type DiagramEditorHandle = {
+  // Confirms the current edit: deselects the active object, or finishes
+  // the active route if one is being drawn.
+  clearSelection: () => void;
+};
+
 type DiagramEditorProps = {
   value: DiagramData | null;
   onChange: (data: DiagramData) => void;
   onDragStateChange?: (dragging: boolean) => void;
+  // Reports the currently selected/active object so a parent can offer a
+  // contextual "Save cone / Save QB / Save route" action.
+  onSelectionChange?: (info: DiagramSelectionInfo) => void;
+  // Caps the field's rendered height. When set, the field shrinks
+  // proportionally instead of forcing the screen to overflow.
+  maxFieldHeight?: number;
 };
 
 type Mode = "normal" | "route" | "ballpath";
@@ -81,14 +108,17 @@ const CONE_COLOR_OPTIONS: { value: string; label: string }[] = [
   { value: "#FFFFFF", label: "White" },
 ];
 
-const FIELD_BG = "#FFFFFF";
-const LINE_10 = "#C8C8C8";
-const LINE_5 = "#DCDCDC";
-const LINE_1 = "#EEEEEE";
-const HASH_COLOR = "#E8E8E8";
-const NUMBER_COLOR = "rgba(0,0,0,0.45)";
-const SIDELINE = "#D0D0D0";
-const PATH_LABEL_COLOR = "#555555";
+// Black-turf field — mirrors the UFF Mobile design (variant-a-newdrill).
+const FIELD_BG = "#0A0E0B";
+const FIELD_BG_TOP = "#0E1410";
+const LINE_10 = "rgba(244,244,242,0.22)";
+const LINE_5 = "rgba(244,244,242,0.12)";
+const LINE_1 = "rgba(244,244,242,0.05)";
+const HASH_COLOR = "rgba(244,244,242,0.08)";
+const NUMBER_COLOR = "rgba(244,244,242,0.55)";
+const SIDELINE = "rgba(244,244,242,0.18)";
+const PATH_LABEL_COLOR = "rgba(244,244,242,0.7)";
+const WATERMARK_COLOR = "rgba(244,244,242,0.25)";
 
 const MOVEMENTS: Path["movement"][] = ["sprint", "backpedal", "shuffle", "jog"];
 
@@ -352,12 +382,29 @@ function FootballField() {
 
   return (
     <G>
-      <Rect x={0} y={0} width={FIELD_W} height={FIELD_H} fill={FIELD_BG} />
+      <Defs>
+        <LinearGradient id="turf" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor={FIELD_BG_TOP} />
+          <Stop offset="1" stopColor={FIELD_BG} />
+        </LinearGradient>
+      </Defs>
+      <Rect x={0} y={0} width={FIELD_W} height={FIELD_H} fill="url(#turf)" />
       {lines}
       {hashes}
       <Line x1={0} y1={0} x2={0} y2={FIELD_H} stroke={SIDELINE} strokeWidth={1} />
       <Line x1={FIELD_W} y1={0} x2={FIELD_W} y2={FIELD_H} stroke={SIDELINE} strokeWidth={1} />
       {numbers}
+      <SvgText
+        x={FIELD_W - 2}
+        y={8}
+        fontSize={5}
+        fill={WATERMARK_COLOR}
+        textAnchor="end"
+        letterSpacing={0.6}
+        fontWeight="700"
+      >
+        WIDTH 20 YDS
+      </SvgText>
     </G>
   );
 }
@@ -370,11 +417,16 @@ type TouchState =
   | { kind: "ballpath"; ballPathId: string }
   | { kind: "background"; startX: number; startY: number };
 
-export default function DiagramEditor({
-  value,
-  onChange,
-  onDragStateChange,
-}: DiagramEditorProps) {
+function DiagramEditorInner(
+  {
+    value,
+    onChange,
+    onDragStateChange,
+    onSelectionChange,
+    maxFieldHeight,
+  }: DiagramEditorProps,
+  ref: React.Ref<DiagramEditorHandle>
+) {
   const data: DiagramData = value
     ? {
       ...value,
@@ -1204,6 +1256,48 @@ export default function DiagramEditor({
     : null;
   const canFinishRoute = !!activeRoute && activeRoute.waypoints.length >= 2;
 
+  const selectionInfo: DiagramSelectionInfo = useMemo(() => {
+    if (selectedCone) {
+      const kind = selectedCone.kind ?? "cone";
+      if (kind === "qb") return { kind: "qb", label: "QB" };
+      if (kind === "football") return { kind: "football", label: "football" };
+      return { kind: "cone", label: "cone" };
+    }
+    if (mode === "route" && activeRoute) {
+      return { kind: "route", label: "route" };
+    }
+    return null;
+  }, [selectedCone, mode, activeRoute]);
+
+  const onSelectionChangeRef = useRef(onSelectionChange);
+  onSelectionChangeRef.current = onSelectionChange;
+  useEffect(() => {
+    onSelectionChangeRef.current?.(selectionInfo);
+  }, [selectionInfo]);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      clearSelection: () => {
+        if (mode === "route" && activeRoute) {
+          if (canFinishRoute) {
+            finishActiveRoute();
+          } else {
+            // Active route doesn't have enough waypoints to finish — drop
+            // the in-progress route and return to normal mode.
+            const routes = data.routes.filter((r) => r.id !== activeRoute.id);
+            update({ ...data, routes });
+            setActiveRouteId(null);
+            setMode("normal");
+          }
+          return;
+        }
+        setSelectedId(null);
+      },
+    }),
+    [mode, activeRoute, canFinishRoute, finishActiveRoute, data, update]
+  );
+
   return (
     <View style={{ width: "100%" }}>
       <View
@@ -1214,13 +1308,18 @@ export default function DiagramEditor({
           })
         }
         style={{
-          width: "100%",
-          aspectRatio: VIEW_W / VIEW_H,
+          ...(maxFieldHeight
+            ? {
+                height: maxFieldHeight,
+                width: maxFieldHeight * (VIEW_W / VIEW_H),
+                alignSelf: "center",
+              }
+            : { width: "100%", aspectRatio: VIEW_W / VIEW_H }),
           borderRadius: radius.lg,
           overflow: "hidden",
           borderWidth: 1,
           borderColor: colors.border.card,
-          backgroundColor: "#FFFFFF",
+          backgroundColor: FIELD_BG,
           shadowColor: "#000",
           shadowOpacity: 0.25,
           shadowOffset: { width: 0, height: 4 },
@@ -1425,17 +1524,26 @@ export default function DiagramEditor({
             const isQB = cone.kind === "qb";
             const isFootball = cone.kind === "football";
             if (isFootball) {
-              const fillColor = isSel ? SELECT_COLOR : FOOTBALL_COLOR;
-              const ringColor = isSel ? SELECT_COLOR : FOOTBALL_COLOR;
               return (
                 <G key={cone.id}>
+                  {isSel && (
+                    <Ellipse
+                      cx={cone.x}
+                      cy={cone.y}
+                      rx={9}
+                      ry={6.5}
+                      fill="none"
+                      stroke={SELECT_COLOR}
+                      strokeWidth={1.5}
+                    />
+                  )}
                   <Ellipse
                     cx={cone.x}
                     cy={cone.y}
                     rx={6}
                     ry={3.5}
-                    fill={fillColor}
-                    stroke={ringColor}
+                    fill={FOOTBALL_COLOR}
+                    stroke={FOOTBALL_COLOR}
                     strokeWidth={1.2}
                   />
                   <Line x1={cone.x - 2.5} y1={cone.y} x2={cone.x + 2.5} y2={cone.y} stroke={FOOTBALL_LACES} strokeWidth={0.8} />
@@ -1448,14 +1556,26 @@ export default function DiagramEditor({
             const baseColor = isQB
               ? cone.color ?? QB_COLOR
               : cone.color ?? CONE_COLOR;
-            const fillColor = isSel ? SELECT_COLOR : baseColor;
-            const ringColor = isSel ? SELECT_COLOR : baseColor;
+            // Selection is shown via an outer ring so live color edits stay
+            // visible while a cone is selected.
+            const fillColor = baseColor;
+            const ringColor = baseColor;
             const r = isQB ? CONE_R + 1 : CONE_R;
             const labelText = cone.label?.trim() ?? "";
             const showLabel = labelText.length > 0;
             const trianglePoints = `${cone.x},${cone.y - r} ${cone.x - r * 0.85},${cone.y + r * 0.85} ${cone.x + r * 0.85},${cone.y + r * 0.85}`;
             return (
               <G key={cone.id}>
+                {isSel && (
+                  <Circle
+                    cx={cone.x}
+                    cy={cone.y}
+                    r={r + 3}
+                    fill="none"
+                    stroke={SELECT_COLOR}
+                    strokeWidth={1.5}
+                  />
+                )}
                 {isQB ? (
                   <Circle
                     cx={cone.x}
@@ -1519,12 +1639,15 @@ export default function DiagramEditor({
             <Text
               style={{
                 fontSize: 13,
-                color: colors.text.muted,
+                color: colors.text.secondary,
                 fontWeight: "500",
-                backgroundColor: "rgba(255,255,255,0.85)",
+                backgroundColor: "rgba(244,244,242,0.06)",
+                borderWidth: 1,
+                borderColor: "rgba(244,244,242,0.12)",
                 paddingHorizontal: 12,
                 paddingVertical: 6,
                 borderRadius: radius.md,
+                overflow: "hidden",
               }}
             >
               Place cones to define your setup
@@ -1550,13 +1673,13 @@ export default function DiagramEditor({
               width: 36,
               height: 36,
               borderRadius: 18,
-              backgroundColor: "rgba(255,255,255,0.92)",
+              backgroundColor: "rgba(20,20,23,0.85)",
               alignItems: "center",
               justifyContent: "center",
               borderWidth: 1,
-              borderColor: "rgba(0,0,0,0.08)",
+              borderColor: "rgba(244,244,242,0.18)",
               shadowColor: "#000",
-              shadowOpacity: 0.18,
+              shadowOpacity: 0.4,
               shadowOffset: { width: 0, height: 2 },
               shadowRadius: 4,
               elevation: 3,
@@ -1566,7 +1689,7 @@ export default function DiagramEditor({
             <Ionicons
               name="trash"
               size={18}
-              color="rgba(0,0,0,0.65)"
+              color={colors.text.primary}
             />
           </Pressable>
         </View>
@@ -1600,7 +1723,20 @@ export default function DiagramEditor({
 
         {mode === "route" && (
           <View style={{ gap: spacing.md }}>
-            <ContextLabel>Next Segment</ContextLabel>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <ContextLabel>Next Segment</ContextLabel>
+              <TextAction
+                label="Undo"
+                onPress={handleUndoLastWaypoint}
+                disabled={!activeRoute || activeRoute.waypoints.length === 0}
+              />
+            </View>
             <View style={{ flexDirection: "row", gap: spacing.sm, flexWrap: "wrap" }}>
               {SEGMENT_TYPES.map((t) => (
                 <PillButton
@@ -1614,26 +1750,6 @@ export default function DiagramEditor({
             <Text style={{ fontSize: 13, color: colors.text.secondary }}>
               Tap the field to place route points.
             </Text>
-            <View
-              style={{
-                flexDirection: "row",
-                gap: spacing.sm,
-                alignItems: "center",
-              }}
-            >
-              <PrimaryAction
-                label="Finish"
-                onPress={finishActiveRoute}
-                disabled={!canFinishRoute}
-              />
-              <SecondaryAction
-                label="Undo"
-                onPress={handleUndoLastWaypoint}
-                disabled={!activeRoute || activeRoute.waypoints.length === 0}
-              />
-              <View style={{ flex: 1 }} />
-              <TextAction label="Cancel" onPress={handleCancelRoute} />
-            </View>
           </View>
         )}
 
@@ -1776,13 +1892,26 @@ export default function DiagramEditor({
 
         {selectedCone && editingPathIdx === null && (
           <View style={{ gap: spacing.md }}>
-            <ContextLabel>
-              {selectedCone.kind === "qb"
-                ? "Selected QB"
-                : selectedCone.kind === "football"
-                  ? "Selected Football"
-                  : "Selected Cone"}
-            </ContextLabel>
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "space-between",
+              }}
+            >
+              <ContextLabel>
+                {selectedCone.kind === "qb"
+                  ? "Selected QB"
+                  : selectedCone.kind === "football"
+                    ? "Selected Football"
+                    : "Selected Cone"}
+              </ContextLabel>
+              <TextAction
+                label="Delete"
+                onPress={handleDeleteSelected}
+                color={colors.error}
+              />
+            </View>
             <TextInput
               value={selectedCone.label}
               onChangeText={handleLabelChange}
@@ -1846,24 +1975,17 @@ export default function DiagramEditor({
                 onPress={handleStartBallPath}
               />
             )}
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <TextAction
-                label="Delete"
-                onPress={handleDeleteSelected}
-                color={colors.error}
-              />
-              <View style={{ flex: 1 }} />
-              <TextAction
-                label="Done"
-                onPress={() => setSelectedId(null)}
-              />
-            </View>
           </View>
         )}
       </View>
     </View>
   );
 }
+
+const DiagramEditor = forwardRef<DiagramEditorHandle, DiagramEditorProps>(
+  DiagramEditorInner
+);
+export default DiagramEditor;
 
 type IoniconName = React.ComponentProps<typeof Ionicons>["name"];
 
@@ -2179,13 +2301,24 @@ function TextAction({
   label,
   onPress,
   color,
+  disabled,
 }: {
   label: string;
   onPress: () => void;
   color?: string;
+  disabled?: boolean;
 }) {
   return (
-    <Pressable onPress={onPress} hitSlop={8} style={{ paddingVertical: spacing.sm, paddingHorizontal: spacing.xs }}>
+    <Pressable
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
+      hitSlop={8}
+      style={{
+        paddingVertical: spacing.sm,
+        paddingHorizontal: spacing.xs,
+        opacity: disabled ? 0.4 : 1,
+      }}
+    >
       <Text
         style={{
           fontSize: 13,

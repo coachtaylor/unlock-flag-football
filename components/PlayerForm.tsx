@@ -1,32 +1,35 @@
-import { useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   Text,
+  TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
-import { Input } from "./ui/Input";
-import { TextArea } from "./ui/TextArea";
-import { Button } from "./ui/Button";
-import { Tag } from "./ui/Tag";
-import { colors, spacing } from "../constants/design";
+import * as Haptics from "expo-haptics";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
+import { useFocusEffect, useRouter } from "expo-router";
+import { colors, fontWeight, radius, tracking } from "../constants/design";
+import {
+  POSITIONS,
+  POSITION_SIDE,
+  type Side,
+  positionColor,
+  positionTint,
+  sideAccent,
+} from "../constants/positions";
+import { fontStyle, MonoText } from "../constants/typography";
+import {
+  playerColorForIndex,
+  initialsFromName,
+  joinFirstLast,
+  splitFirstLast,
+} from "../lib/athlete";
 import { supabase } from "../lib/supabase";
-
-const POSITION_OPTIONS = [
-  "QB",
-  "WR",
-  "RB",
-  "C",
-  "CB",
-  "S",
-  "LB",
-  "DE",
-  "Rusher",
-];
+import { AthleteHero } from "./ui/AthleteHero";
 
 export type PlayerFormInitial = {
   id: string;
@@ -34,6 +37,11 @@ export type PlayerFormInitial = {
   positions: string[];
   jerseyNumber: string;
   notes: string;
+  // Player's stable color slot (migration 45). Passed through so the
+  // hero preview can render the player's real identity color in edit
+  // mode. Null in create mode — the helper falls back to muted.
+  colorIndex: number | null;
+  isCaptain: boolean;
 };
 
 type Props = {
@@ -42,40 +50,128 @@ type Props = {
   topInset: number;
 };
 
+function lightHaptic() {
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+}
+
 export function PlayerForm({ teamId, initial, topInset }: Props) {
   const router = useRouter();
   const isEditing = !!initial;
+  // PlayerForm always lives inside the tabs navigator (/roster/new and
+  // /roster/[id]/edit are both under app/(tabs)/), so this is safe.
+  const tabBarHeight = useBottomTabBarHeight();
 
-  const [playerName, setPlayerName] = useState(initial?.playerName ?? "");
-  const [positions, setPositions] = useState<string[]>(
-    initial?.positions ?? []
+  const initialFirstLast = useMemo(
+    () => splitFirstLast(initial?.playerName),
+    [initial?.playerName]
   );
-  const [jerseyNumber, setJerseyNumber] = useState(
-    initial?.jerseyNumber ?? ""
+
+  const [first, setFirst] = useState(initialFirstLast.first);
+  const [last, setLast] = useState(initialFirstLast.last);
+  const [jersey, setJersey] = useState(initial?.jerseyNumber ?? "");
+  const [primary, setPrimary] = useState<string | null>(
+    initial?.positions?.[0] ?? null
+  );
+  const [secondary, setSecondary] = useState<string[]>(
+    (initial?.positions ?? []).slice(1, 3)
   );
   const [notes, setNotes] = useState(initial?.notes ?? "");
+  const [isCaptain, setIsCaptain] = useState(initial?.isCaptain ?? false);
+  const [usedJerseys, setUsedJerseys] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const togglePosition = (pos: string) => {
-    setPositions((prev) =>
-      prev.includes(pos) ? prev.filter((p) => p !== pos) : [...prev, pos]
+  // Load in-use jersey numbers once on mount (excluding the current player when editing).
+  useEffect(() => {
+    let cancelled = false;
+    async function loadJerseys() {
+      const query = supabase
+        .from("team_players")
+        .select("jersey_number")
+        .eq("team_id", teamId)
+        .eq("status", "active");
+      const { data, error: qErr } = initial?.id
+        ? await query.neq("id", initial.id)
+        : await query;
+      if (cancelled) return;
+      if (qErr) {
+        console.warn("[player-form] load jerseys:", qErr.message);
+        return;
+      }
+      const nums = (data ?? [])
+        .map((r) => (r as { jersey_number: string | null }).jersey_number)
+        .filter((n): n is string => !!n && n.trim().length > 0);
+      setUsedJerseys(nums);
+    }
+    loadJerseys();
+    return () => {
+      cancelled = true;
+    };
+  }, [teamId, initial?.id]);
+
+  // Reset submit/error state on focus (belt-and-suspenders for warm screens).
+  useFocusEffect(
+    useCallback(() => {
+      setSubmitting(false);
+      setError(null);
+    }, [])
+  );
+
+  const fullName = joinFirstLast(first, last) || "New player";
+  const initials = initialsFromName(joinFirstLast(first, last));
+  const side: Side | null = primary ? POSITION_SIDE[primary] ?? null : null;
+  // In edit mode the hero shows the player's identity color via the
+  // colorIndex passed in `initial`. In create mode there's no slot yet
+  // (auto-assigned by the trigger on insert) — the helper returns a
+  // neutral fallback so the avatar reads as inert until save.
+  const accent = playerColorForIndex(initial?.colorIndex ?? null);
+
+  const setPrimaryPos = (id: string) => {
+    lightHaptic();
+    setPrimary((cur) => (cur === id ? cur : id));
+    // If this id was a secondary, lift it out so it's not in both slots.
+    setSecondary((s) => s.filter((x) => x !== id));
+  };
+
+  const toggleSecondary = (id: string) => {
+    if (id === primary) return;
+    lightHaptic();
+    setSecondary((s) =>
+      s.includes(id) ? s.filter((x) => x !== id) : [...s, id].slice(0, 2)
     );
   };
 
-  const onSubmit = async () => {
+  const resetForm = () => {
+    setFirst("");
+    setLast("");
+    setJersey("");
+    setPrimary(null);
+    setSecondary([]);
+    setNotes("");
+    setIsCaptain(false);
     setError(null);
-    if (!playerName.trim()) {
-      setError("Player name is required.");
+  };
+
+  const buildPositions = () => {
+    if (!primary) return secondary.length > 0 ? secondary : null;
+    return [primary, ...secondary];
+  };
+
+  const onSubmit = async (mode: "back" | "another") => {
+    setError(null);
+    const name = joinFirstLast(first, last);
+    if (!name) {
+      setError("First name is required.");
       return;
     }
     setSubmitting(true);
 
     const payload = {
-      player_name: playerName.trim(),
-      positions: positions.length > 0 ? positions : null,
-      jersey_number: jerseyNumber.trim() || null,
+      player_name: name,
+      positions: buildPositions(),
+      jersey_number: jersey.trim() || null,
       notes: notes.trim() || null,
+      is_captain: isCaptain,
     };
 
     if (isEditing && initial) {
@@ -84,22 +180,33 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
         .update(payload)
         .eq("id", initial.id);
       if (updateErr) {
+        console.warn("[player-form] update failed:", updateErr.message);
         setError(updateErr.message);
         setSubmitting(false);
         return;
       }
+      console.log("[player-form] updated", initial.id);
+      setSubmitting(false);
       router.back();
+      return;
+    }
+
+    const { error: insertErr } = await supabase.from("team_players").insert({
+      ...payload,
+      team_id: teamId,
+      status: "active",
+    });
+    if (insertErr) {
+      console.warn("[player-form] insert failed:", insertErr.message);
+      setError(insertErr.message);
+      setSubmitting(false);
+      return;
+    }
+    console.log("[player-form] inserted player into team", teamId);
+    setSubmitting(false);
+    if (mode === "another") {
+      resetForm();
     } else {
-      const { error: insertErr } = await supabase.from("team_players").insert({
-        ...payload,
-        team_id: teamId,
-        status: "active",
-      });
-      if (insertErr) {
-        setError(insertErr.message);
-        setSubmitting(false);
-        return;
-      }
       router.back();
     }
   };
@@ -109,139 +216,778 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
       style={{ flex: 1, backgroundColor: colors.surface.base }}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
+      {/* Header row */}
       <View
-        className="flex-row items-center"
         style={{
-          paddingTop: topInset + spacing.lg,
-          paddingHorizontal: spacing.xl,
-          paddingBottom: spacing.md,
-          gap: spacing.md,
+          paddingTop: topInset + 6,
+          paddingHorizontal: 18,
+          paddingBottom: 12,
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
         }}
       >
-        <Pressable
+        <TouchableOpacity
           onPress={() => router.back()}
           accessibilityLabel="Back"
           hitSlop={10}
-          style={({ pressed }) => ({
+          activeOpacity={0.7}
+          style={{
             width: 36,
             height: 36,
-            borderRadius: 18,
-            backgroundColor: pressed
-              ? "rgba(255,255,255,0.08)"
-              : "rgba(255,255,255,0.04)",
+            borderRadius: 12,
+            backgroundColor: "rgba(255,255,255,0.04)",
             alignItems: "center",
             justifyContent: "center",
-          })}
-        >
-          <Ionicons
-            name="chevron-back"
-            size={20}
-            color={colors.text.secondary}
-          />
-        </Pressable>
-        <Text
-          style={{
-            fontSize: 20,
-            lineHeight: 28,
-            fontWeight: "500",
-            color: colors.text.primary,
           }}
         >
-          {isEditing ? "Edit Player" : "Add Player"}
-        </Text>
+          <Ionicons name="chevron-back" size={18} color={colors.text.primary} />
+        </TouchableOpacity>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+          <MonoText
+            weight="bold"
+            style={{
+              fontSize: 11,
+              fontWeight: fontWeight.bold,
+              color: colors.orange[500],
+              letterSpacing: tracking.loose,
+            }}
+          >
+            .0{isEditing ? 2 : 1}
+          </MonoText>
+          <Text
+            style={[
+              fontStyle("bold"),
+              {
+                fontSize: 11,
+                fontWeight: fontWeight.bold,
+                color: colors.text.secondary,
+                letterSpacing: tracking.loose,
+                textTransform: "uppercase",
+              },
+            ]}
+          >
+            ROSTER · {isEditing ? "EDIT" : "NEW"}
+          </Text>
+        </View>
+        <View
+          style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+        >
+          <View
+            style={{
+              width: 6,
+              height: 6,
+              borderRadius: 3,
+              backgroundColor: colors.lime[400],
+            }}
+          />
+          <Text
+            style={[
+              fontStyle("bold"),
+              {
+                fontSize: 11,
+                fontWeight: fontWeight.bold,
+                color: colors.text.muted,
+                letterSpacing: tracking.loose,
+              },
+            ]}
+          >
+            AUTO
+          </Text>
+        </View>
       </View>
 
       <ScrollView
         contentContainerStyle={{
-          paddingHorizontal: spacing.xl,
-          paddingTop: spacing.lg,
-          paddingBottom: spacing["3xl"] + 80,
-          gap: spacing.xl,
+          // ~140px = footer (buttons + draft hint + padding) and ensures the
+          // last form section clears the sticky footer + tab bar.
+          paddingBottom: tabBarHeight + 140,
         }}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <Input
-          label="Player Name"
-          value={playerName}
-          onChangeText={setPlayerName}
-          placeholder="e.g., Marcus Johnson"
-          autoCapitalize="words"
-          returnKeyType="next"
-        />
-
-        <View>
-          <Text
-            style={{
-              fontSize: 11,
-              lineHeight: 14,
-              letterSpacing: 0.5,
-              textTransform: "uppercase",
-              color: colors.text.secondary,
-              fontWeight: "500",
-              marginBottom: spacing.sm,
-            }}
-          >
-            Positions
-          </Text>
-          <View
-            className="flex-row flex-wrap"
-            style={{ gap: spacing.sm }}
-          >
-            {POSITION_OPTIONS.map((pos) => (
-              <Tag
-                key={pos}
-                label={pos}
-                selected={positions.includes(pos)}
-                onPress={() => togglePosition(pos)}
-              />
-            ))}
-          </View>
+        {/* Hero preview */}
+        <View style={{ paddingHorizontal: 16 }}>
+          <AthleteHero
+            initials={initials}
+            fullName={fullName}
+            jersey={jersey}
+            accent={accent}
+            side={side}
+            primary={primary}
+            secondary={secondary}
+            eyebrow={{ label: "Live preview", color: colors.lime[400] }}
+          />
         </View>
 
-        <Input
-          label="Jersey Number"
-          value={jerseyNumber}
-          onChangeText={setJerseyNumber}
-          placeholder="e.g., 7"
-          keyboardType="number-pad"
-          maxLength={4}
-          style={{ width: 120 }}
-        />
+        {/* 01 Identity */}
+        <Section idx="01" title="Identity">
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <View style={{ flex: 1 }}>
+              <FieldLabel>First name</FieldLabel>
+              <FormInput
+                value={first}
+                onChangeText={setFirst}
+                placeholder="Marcus"
+                autoCapitalize="words"
+                returnKeyType="next"
+              />
+            </View>
+            <View style={{ flex: 1 }}>
+              <FieldLabel>Last name</FieldLabel>
+              <FormInput
+                value={last}
+                onChangeText={setLast}
+                placeholder="Johnson"
+                autoCapitalize="words"
+                returnKeyType="next"
+              />
+            </View>
+          </View>
+          <View style={{ marginTop: 14 }}>
+            <FieldLabel>Jersey #</FieldLabel>
+            <View
+              style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+            >
+              <FormInput
+                value={jersey}
+                onChangeText={(v) => setJersey(v.replace(/\D/g, "").slice(0, 3))}
+                placeholder="7"
+                keyboardType="number-pad"
+                mono
+                style={{
+                  width: 92,
+                  textAlign: "center",
+                  fontSize: 18,
+                  fontWeight: fontWeight.bold,
+                }}
+              />
+              {usedJerseys.length > 0 ? (
+                <Text
+                  style={[
+                    fontStyle("regular"),
+                    {
+                      flex: 1,
+                      fontSize: 11,
+                      color: colors.text.muted,
+                      lineHeight: 16,
+                    },
+                  ]}
+                  numberOfLines={2}
+                >
+                  Numbers{" "}
+                  <Text style={{ color: colors.text.secondary, fontFamily: "JetBrainsMono_500Medium" }}>
+                    {usedJerseys.join(", ")}
+                  </Text>{" "}
+                  in use.
+                </Text>
+              ) : null}
+            </View>
+          </View>
+        </Section>
 
-        <TextArea
-          label="Notes"
-          value={notes}
-          onChangeText={setNotes}
-          placeholder="Anything to remember about this player..."
-          style={{ minHeight: 110 }}
-        />
+        {/* 02 Position */}
+        <Section
+          idx="02"
+          title="Position"
+          sub="Primary first — drives drill targeting."
+        >
+          <View style={{ gap: 12 }}>
+            <PositionGroup
+              sideLabel="OFFENSE"
+              side="offense"
+              positions={POSITIONS.offense}
+              primary={primary}
+              secondary={secondary}
+              onPrimary={setPrimaryPos}
+              onSecondary={toggleSecondary}
+            />
+            <PositionGroup
+              sideLabel="DEFENSE"
+              side="defense"
+              positions={POSITIONS.defense}
+              primary={primary}
+              secondary={secondary}
+              onPrimary={setPrimaryPos}
+              onSecondary={toggleSecondary}
+            />
+          </View>
+          <Text
+            style={[
+              fontStyle("regular"),
+              {
+                fontSize: 11,
+                color: colors.text.muted,
+                marginTop: 12,
+                lineHeight: 16,
+              },
+            ]}
+          >
+            Tap = primary · Long-press = secondary (max 2)
+          </Text>
+        </Section>
+
+        {/* 03 Captain */}
+        <Section
+          idx="03"
+          title="Captain"
+          sub="Flag this player as a team captain."
+          optional
+        >
+          <CaptainToggle
+            value={isCaptain}
+            onChange={(v) => {
+              lightHaptic();
+              setIsCaptain(v);
+            }}
+          />
+        </Section>
+
+        {/* 04 Notes */}
+        <Section idx="04" title="Notes" optional>
+          <TextInput
+            value={notes}
+            onChangeText={setNotes}
+            placeholder="Strong arm. Plays catcher in baseball — good for shuttle drills."
+            placeholderTextColor={colors.text.muted}
+            multiline
+            textAlignVertical="top"
+            style={[
+              fontStyle("regular"),
+              {
+                minHeight: 88,
+                borderRadius: radius.input,
+                borderWidth: 1,
+                borderColor: colors.border.card,
+                backgroundColor: colors.surface.input,
+                color: colors.text.primary,
+                fontSize: 14,
+                lineHeight: 20,
+                paddingHorizontal: 14,
+                paddingVertical: 12,
+              },
+            ]}
+          />
+        </Section>
 
         {error ? (
-          <Text
+          <View style={{ paddingHorizontal: 18, marginTop: 16 }}>
+            <Text
+              style={[
+                fontStyle("medium"),
+                { fontSize: 13, color: colors.errorLight },
+              ]}
+            >
+              {error}
+            </Text>
+          </View>
+        ) : null}
+      </ScrollView>
+
+      {/* Sticky footer — sits above the tab bar */}
+      <View
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: tabBarHeight,
+          paddingHorizontal: 16,
+          paddingTop: 12,
+          paddingBottom: 16,
+          backgroundColor: colors.surface.base,
+          borderTopWidth: 1,
+          borderTopColor: colors.border.subtle,
+        }}
+      >
+        <View style={{ flexDirection: "row", gap: 10 }}>
+          {!isEditing ? (
+            <TouchableOpacity
+              onPress={() => onSubmit("another")}
+              disabled={submitting}
+              activeOpacity={0.85}
+              accessibilityLabel="Save and add another"
+              style={{
+                height: 52,
+                paddingHorizontal: 16,
+                borderRadius: 14,
+                backgroundColor: colors.surface.raised,
+                borderWidth: 1,
+                borderColor: colors.border.default,
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: submitting ? 0.5 : 1,
+              }}
+            >
+              <Text
+                style={[
+                  fontStyle("semibold"),
+                  {
+                    fontSize: 13,
+                    fontWeight: fontWeight.semibold,
+                    color: colors.text.primary,
+                  },
+                ]}
+              >
+                Save & add another
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+          <TouchableOpacity
+            onPress={() => onSubmit("back")}
+            disabled={submitting}
+            activeOpacity={0.9}
+            accessibilityLabel={isEditing ? "Save changes" : "Add player"}
             style={{
-              fontSize: 13,
-              lineHeight: 18,
-              color: colors.errorLight,
+              flex: 1,
+              height: 52,
+              borderRadius: 14,
+              backgroundColor: colors.orange[500],
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "row",
+              gap: 8,
+              opacity: submitting ? 0.7 : 1,
+              shadowColor: colors.orange[500],
+              shadowOpacity: 0.35,
+              shadowRadius: 12,
+              shadowOffset: { width: 0, height: 4 },
             }}
           >
-            {error}
-          </Text>
-        ) : null}
-
-        <Button
-          label={
-            submitting
-              ? isEditing
-                ? "Saving…"
-                : "Adding…"
-              : isEditing
-              ? "Save Changes"
-              : "Add Player"
-          }
-          onPress={onSubmit}
-          disabled={submitting}
-        />
-      </ScrollView>
+            <Text
+              style={[
+                fontStyle("bold"),
+                {
+                  fontSize: 15,
+                  fontWeight: fontWeight.bold,
+                  color: colors.text.primary,
+                  letterSpacing: 0.2,
+                },
+              ]}
+            >
+              {submitting
+                ? isEditing
+                  ? "Saving…"
+                  : "Adding…"
+                : isEditing
+                ? "Save changes"
+                : `Add ${first.trim() || "player"}`}
+            </Text>
+            {!submitting ? (
+              <Ionicons name="arrow-forward" size={14} color={colors.text.primary} />
+            ) : null}
+          </TouchableOpacity>
+        </View>
+        <View
+          style={{
+            marginTop: 10,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 10,
+          }}
+        >
+          <View
+            style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+          >
+            <Ionicons
+              name="checkmark"
+              size={11}
+              color={colors.text.muted}
+            />
+            <Text
+              style={[
+                fontStyle("regular"),
+                { fontSize: 11, color: colors.text.muted },
+              ]}
+            >
+              Draft auto-saved
+            </Text>
+          </View>
+        </View>
+      </View>
     </KeyboardAvoidingView>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// SECTION + FORM PRIMITIVES
+// ──────────────────────────────────────────────────────────────────────
+
+function Section({
+  idx,
+  title,
+  sub,
+  optional,
+  children,
+}: {
+  idx: string;
+  title: string;
+  sub?: string;
+  optional?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <View style={{ paddingHorizontal: 18, paddingTop: 24 }}>
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "baseline",
+          gap: 10,
+          marginBottom: sub ? 4 : 14,
+        }}
+      >
+        <MonoText
+          weight="bold"
+          style={{
+            fontSize: 11,
+            fontWeight: fontWeight.bold,
+            color: colors.orange[500],
+            letterSpacing: 0.4,
+          }}
+        >
+          {idx}
+        </MonoText>
+        <Text
+          style={[
+            fontStyle("bold"),
+            {
+              fontSize: 16,
+              fontWeight: fontWeight.bold,
+              color: colors.text.primary,
+              letterSpacing: -0.2,
+            },
+          ]}
+        >
+          {title}
+        </Text>
+        {optional ? (
+          <MonoText
+            weight="medium"
+            style={{
+              fontSize: 10,
+              color: colors.text.muted,
+              marginLeft: 4,
+              letterSpacing: tracking.loose,
+            }}
+          >
+            OPTIONAL
+          </MonoText>
+        ) : null}
+      </View>
+      {sub ? (
+        <Text
+          style={[
+            fontStyle("regular"),
+            {
+              fontSize: 12,
+              color: colors.text.secondary,
+              marginBottom: 14,
+              marginLeft: 22,
+            },
+          ]}
+        >
+          {sub}
+        </Text>
+      ) : null}
+      <View>{children}</View>
+    </View>
+  );
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <Text
+      style={[
+        fontStyle("medium"),
+        {
+          fontSize: 11,
+          color: colors.text.label,
+          letterSpacing: 0.5,
+          textTransform: "uppercase",
+          marginBottom: 8,
+          fontWeight: fontWeight.medium,
+        },
+      ]}
+    >
+      {children}
+    </Text>
+  );
+}
+
+function FormInput({
+  value,
+  onChangeText,
+  placeholder,
+  keyboardType,
+  autoCapitalize,
+  returnKeyType,
+  mono,
+  style,
+}: {
+  value: string;
+  onChangeText: (v: string) => void;
+  placeholder?: string;
+  keyboardType?: "default" | "number-pad" | "decimal-pad" | "email-address";
+  autoCapitalize?: "none" | "sentences" | "words" | "characters";
+  returnKeyType?: "done" | "go" | "next" | "search" | "send";
+  mono?: boolean;
+  style?: object;
+}) {
+  return (
+    <TextInput
+      value={value}
+      onChangeText={onChangeText}
+      placeholder={placeholder}
+      placeholderTextColor={colors.text.muted}
+      keyboardType={keyboardType}
+      autoCapitalize={autoCapitalize}
+      returnKeyType={returnKeyType}
+      style={[
+        mono ? { fontFamily: "JetBrainsMono_500Medium" } : fontStyle("regular"),
+        {
+          minHeight: 46,
+          paddingHorizontal: 14,
+          paddingVertical: 10,
+          borderRadius: radius.input,
+          borderWidth: 1,
+          borderColor: colors.border.card,
+          backgroundColor: colors.surface.input,
+          color: colors.text.primary,
+          fontSize: 15,
+          lineHeight: 20,
+        },
+        style,
+      ]}
+    />
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// POSITION GROUP + CHIP
+// ──────────────────────────────────────────────────────────────────────
+
+function PositionGroup({
+  sideLabel,
+  side,
+  positions,
+  primary,
+  secondary,
+  onPrimary,
+  onSecondary,
+}: {
+  sideLabel: string;
+  side: Side;
+  positions: { id: string; label: string }[];
+  primary: string | null;
+  secondary: string[];
+  onPrimary: (id: string) => void;
+  onSecondary: (id: string) => void;
+}) {
+  return (
+    <View>
+      <Text
+        style={[
+          fontStyle("bold"),
+          {
+            fontSize: 10,
+            fontWeight: fontWeight.bold,
+            color: sideAccent(side),
+            letterSpacing: tracking.loose,
+            textTransform: "uppercase",
+            marginBottom: 8,
+            opacity: 0.85,
+          },
+        ]}
+      >
+        {sideLabel}
+      </Text>
+      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+        {positions.map((p) => (
+          <PosChip
+            key={p.id}
+            label={p.label}
+            id={p.id}
+            isPrimary={primary === p.id}
+            isSecondary={secondary.includes(p.id)}
+            onPrimary={() => onPrimary(p.id)}
+            onSecondary={() => onSecondary(p.id)}
+          />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function CaptainToggle({
+  value,
+  onChange,
+}: {
+  value: boolean;
+  onChange: (next: boolean) => void;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={() => onChange(!value)}
+      activeOpacity={0.85}
+      accessibilityRole="switch"
+      accessibilityState={{ checked: value }}
+      accessibilityLabel="Mark as captain"
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 12,
+        padding: 14,
+        borderRadius: radius.input,
+        borderWidth: 1,
+        borderColor: value ? colors.orange[500] : colors.border.card,
+        backgroundColor: value
+          ? colors.orange.tint
+          : colors.surface.input,
+      }}
+    >
+      <View
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 18,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: value
+            ? colors.orange[500]
+            : colors.surface.overlay,
+        }}
+      >
+        <Ionicons
+          name="star"
+          size={16}
+          color={value ? colors.text.primary : colors.text.muted}
+        />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          style={[
+            fontStyle("bold"),
+            {
+              fontSize: 14,
+              fontWeight: fontWeight.bold,
+              color: colors.text.primary,
+            },
+          ]}
+        >
+          Team captain
+        </Text>
+        <Text
+          style={[
+            fontStyle("regular"),
+            {
+              fontSize: 12,
+              color: colors.text.muted,
+              marginTop: 2,
+            },
+          ]}
+        >
+          {value
+            ? "Shows a CAPTAIN tag on the player's card."
+            : "Tap to mark this player as a captain."}
+        </Text>
+      </View>
+      <View
+        style={{
+          width: 44,
+          height: 26,
+          borderRadius: 13,
+          backgroundColor: value
+            ? colors.orange[500]
+            : colors.surface.overlay,
+          padding: 3,
+          justifyContent: "center",
+        }}
+      >
+        <View
+          style={{
+            width: 20,
+            height: 20,
+            borderRadius: 10,
+            backgroundColor: colors.text.primary,
+            alignSelf: value ? "flex-end" : "flex-start",
+          }}
+        />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function PosChip({
+  label,
+  id,
+  isPrimary,
+  isSecondary,
+  onPrimary,
+  onSecondary,
+}: {
+  label: string;
+  id: string;
+  isPrimary: boolean;
+  isSecondary: boolean;
+  onPrimary: () => void;
+  onSecondary: () => void;
+}) {
+  const accent = positionColor(id);
+  const bg = isPrimary
+    ? positionTint(id)
+    : isSecondary
+    ? `${accent}1A`
+    : colors.surface.overlay;
+  const borderColor =
+    isPrimary || isSecondary ? accent : colors.border.default;
+  const color = isPrimary
+    ? accent
+    : isSecondary
+    ? accent
+    : colors.text.secondary;
+
+  return (
+    <TouchableOpacity
+      onPress={onPrimary}
+      onLongPress={onSecondary}
+      delayLongPress={250}
+      activeOpacity={0.85}
+      accessibilityLabel={`${label} ${isPrimary ? "primary position" : "select"}`}
+      style={{
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: radius.pill,
+        backgroundColor: bg,
+        borderWidth: 1,
+        borderColor,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+      }}
+    >
+      {isPrimary ? (
+        <View
+          style={{
+            width: 5,
+            height: 5,
+            borderRadius: 2.5,
+            backgroundColor: accent,
+          }}
+        />
+      ) : null}
+      <Text
+        style={[
+          fontStyle("bold"),
+          {
+            fontSize: 13,
+            fontWeight: fontWeight.bold,
+            color,
+            letterSpacing: 0.1,
+          },
+        ]}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
   );
 }

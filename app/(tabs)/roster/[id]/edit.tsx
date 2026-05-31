@@ -19,11 +19,22 @@ export default function EditPlayerScreen() {
     let cancelled = false;
     (async () => {
       if (!id) return;
-      const { data } = await supabase
-        .from("team_players")
-        .select("id, player_name, positions, jersey_number, notes")
-        .eq("id", id)
-        .maybeSingle();
+      // Try with color_index (migration 45); fall back without it.
+      const sel = (withColor: boolean) =>
+        supabase
+          .from("team_players")
+          .select(
+            `id, player_name, positions, jersey_number, notes, is_captain${
+              withColor ? ", color_index" : ""
+            }`
+          )
+          .eq("id", id)
+          .maybeSingle();
+      let res = await sel(true);
+      if (res.error && /color_index/i.test(res.error.message)) {
+        res = await sel(false);
+      }
+      const data = res.data as Record<string, unknown> | null;
 
       if (cancelled) return;
       if (data) {
@@ -33,6 +44,8 @@ export default function EditPlayerScreen() {
           positions: (data.positions as string[] | null) ?? [],
           jerseyNumber: (data.jersey_number as string | null) ?? "",
           notes: (data.notes as string | null) ?? "",
+          colorIndex: (data.color_index as number | null) ?? null,
+          isCaptain: data.is_captain === true,
         });
       }
       setLoading(false);

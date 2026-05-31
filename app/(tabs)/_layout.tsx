@@ -62,19 +62,6 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
-        name="drills"
-        options={{
-          title: "Drills",
-          tabBarIcon: ({ focused, color }) => (
-            <TabIcon
-              name={focused ? "football" : "football-outline"}
-              color={color}
-              focused={focused}
-            />
-          ),
-        }}
-      />
-      <Tabs.Screen
         name="roster"
         options={{
           title: "Roster",
@@ -88,6 +75,28 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen
+        name="drills"
+        options={{
+          title: "Drills",
+          tabBarIcon: ({ focused, color }) => (
+            <TabIcon
+              name={focused ? "football" : "football-outline"}
+              color={color}
+              focused={focused}
+            />
+          ),
+        }}
+        listeners={({ navigation }) => ({
+          // Always land users on the drill library when they tap Drills,
+          // even if the drills stack still has /drills/new on top from the
+          // practice planner's "+" flow.
+          tabPress: (e) => {
+            e.preventDefault();
+            navigation.navigate("drills", { screen: "index" });
+          },
+        })}
+      />
+      <Tabs.Screen
         name="practice"
         options={{
           title: "Practice",
@@ -99,6 +108,16 @@ export default function TabsLayout() {
             />
           ),
         }}
+        listeners={({ navigation }) => ({
+          // Always land users on the practice library when they tap Practice.
+          // Without this, deep links into /practice/[id] (from the dashboard
+          // hero, Moves, or activity feed) keep the stack focused on that
+          // detail page, so the tab tap looks like a no-op.
+          tabPress: (e) => {
+            e.preventDefault();
+            navigation.navigate("practice", { screen: "index" });
+          },
+        })}
       />
     </Tabs>
   );

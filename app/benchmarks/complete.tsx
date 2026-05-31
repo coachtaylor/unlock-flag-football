@@ -4,16 +4,26 @@ import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "../../components/ui/Button";
-import { colors, spacing } from "../../constants/design";
+import { colors, fontFamily, radius, spacing } from "../../constants/design";
 import { supabase } from "../../lib/supabase";
 
 export default function BenchmarkCompleteScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ drill?: string; count?: string }>();
+  const params = useLocalSearchParams<{
+    drill?: string;
+    players?: string;
+    sets?: string;
+    // legacy
+    count?: string;
+  }>();
   const drillId = params.drill ?? null;
-  const rawCount = Number(params.count ?? "0");
-  const count = Number.isFinite(rawCount) && rawCount > 0 ? rawCount : 0;
+  const playersRaw = Number(params.players ?? params.count ?? "0");
+  const playerCount =
+    Number.isFinite(playersRaw) && playersRaw > 0 ? Math.floor(playersRaw) : 0;
+  const setsRaw = Number(params.sets ?? "0");
+  const setsPerPlayer =
+    Number.isFinite(setsRaw) && setsRaw > 0 ? Math.floor(setsRaw) : 0;
 
   const [drillName, setDrillName] = useState<string>("the drill");
 
@@ -91,9 +101,51 @@ export default function BenchmarkCompleteScreen() {
             maxWidth: 280,
           }}
         >
-          Logged results for {count} {count === 1 ? "player" : "players"} on{" "}
-          {drillName}.
+          Logged{" "}
+          {playerCount} {playerCount === 1 ? "player" : "players"}
+          {setsPerPlayer > 0
+            ? ` × ${setsPerPlayer} ${setsPerPlayer === 1 ? "set" : "sets"}`
+            : ""}{" "}
+          on {drillName}.
         </Text>
+
+        {setsPerPlayer > 0 && playerCount > 0 ? (
+          <View
+            style={{
+              marginTop: spacing.xl,
+              paddingHorizontal: spacing.lg,
+              paddingVertical: spacing.md,
+              borderRadius: radius.lg,
+              backgroundColor: colors.surface.raised,
+              borderWidth: 1,
+              borderColor: colors.border.card,
+            }}
+          >
+            <Text
+              style={{
+                fontFamily: fontFamily.monoBold,
+                fontSize: 18,
+                color: colors.text.primary,
+                textAlign: "center",
+              }}
+            >
+              {playerCount * setsPerPlayer}
+            </Text>
+            <Text
+              style={{
+                fontFamily: fontFamily.sansBold,
+                fontSize: 10,
+                letterSpacing: 1,
+                textTransform: "uppercase",
+                color: colors.text.subtle,
+                textAlign: "center",
+                marginTop: 2,
+              }}
+            >
+              sets captured
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={{ gap: spacing.md }}>
