@@ -1,32 +1,59 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Animated,
   Easing,
-  FlatList,
-  Pressable,
   RefreshControl,
+  ScrollView,
   Text,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Button } from "../../../components/ui/Button";
-import { colors, radius, spacing } from "../../../constants/design";
+import { PlayerCard, type PlayerCardData } from "../../../components/ui/PlayerCard";
+import { colors, fontWeight, radius, tracking } from "../../../constants/design";
+import { POSITION_SIDE } from "../../../constants/positions";
+import { fontStyle, MonoText } from "../../../constants/typography";
 import { supabase } from "../../../lib/supabase";
 import { useTeam } from "../../../lib/team-context";
 
-type Player = {
+type RawPlayer = {
   id: string;
-  name: string;
-  positions: string[];
-  jerseyNumber: string | null;
+  player_name: string;
+  positions: string[] | null;
+  jersey_number: string | null;
   status: "active" | "inactive";
+  is_captain: boolean;
+  // Optional — migration 43 may not be applied yet.
+  is_injured?: boolean | null;
+  // Optional — migration 45 may not be applied yet.
+  color_index?: number | null;
 };
+
+type RawBenchmark = {
+  player_id: string;
+  time_seconds: number | null;
+  rating: number | null;
+  created_at: string;
+  team_drills:
+    | { drill_name: string; benchmark_type: string | null }
+    | { drill_name: string; benchmark_type: string | null }[]
+    | null;
+};
+
+type Filter = "all" | "offense" | "defense" | "bench" | "prs";
+
+const ROSTER_CAP = 15;
 
 function lightHaptic() {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+}
+
+function pickRelation<T>(value: T | T[] | null | undefined): T | null {
+  if (Array.isArray(value)) return value[0] ?? null;
+  return value ?? null;
 }
 
 function SkeletonCard() {
@@ -55,8 +82,8 @@ function SkeletonCard() {
   return (
     <Animated.View
       style={{
-        height: 72,
-        borderRadius: radius.lg,
+        height: 78,
+        borderRadius: 16,
         backgroundColor: colors.surface.raised,
         opacity,
       }}
@@ -64,119 +91,127 @@ function SkeletonCard() {
   );
 }
 
-function PositionPill({ label }: { label: string }) {
-  return (
-    <View
-      style={{
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: radius.pill,
-        backgroundColor: "rgba(255,255,255,0.04)",
-      }}
-    >
-      <Text
-        style={{
-          fontSize: 11,
-          letterSpacing: 0.5,
-          textTransform: "uppercase",
-          color: "rgba(255,255,255,0.55)",
-        }}
-      >
-        {label}
-      </Text>
-    </View>
-  );
-}
-
-function PlayerRow({
-  player,
-  onPress,
-  inactive,
-}: {
-  player: Player;
-  onPress: () => void;
-  inactive?: boolean;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      className="flex-row items-center"
-      style={({ pressed }) => ({
-        backgroundColor: colors.surface.raised,
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.14)",
-        padding: spacing.lg,
-        minHeight: 44,
-        gap: spacing.md,
-        opacity: inactive ? (pressed ? 0.5 : 0.6) : pressed ? 0.85 : 1,
-      })}
-    >
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text
-          numberOfLines={1}
-          style={{
-            fontSize: 15,
-            lineHeight: 22,
-            fontWeight: "500",
-            color: colors.text.primary,
-          }}
-        >
-          {player.name}
-        </Text>
-        {player.positions.length > 0 ? (
-          <View
-            className="flex-row flex-wrap items-center"
-            style={{ gap: spacing.xs, marginTop: spacing.xs }}
-          >
-            {player.positions.map((p) => (
-              <PositionPill key={p} label={p} />
-            ))}
-          </View>
-        ) : null}
-      </View>
-      {player.jerseyNumber ? (
-        <Text
-          style={{
-            fontSize: 13,
-            color: colors.text.secondary,
-            fontVariant: ["tabular-nums"],
-          }}
-        >
-          #{player.jerseyNumber}
-        </Text>
-      ) : null}
-      <Ionicons name="chevron-forward" size={18} color={colors.text.muted} />
-    </Pressable>
-  );
-}
-
 export default function RosterScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { teamId } = useTeam();
+  const { teamId, teamName } = useTeam();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [players, setPlayers] = useState<Player[]>([]);
+  const [players, setPlayers] = useState<PlayerCardData[]>([]);
+  const [filter, setFilter] = useState<Filter>("all");
 
   const load = useCallback(async () => {
     if (!teamId) return;
-    const { data } = await supabase
-      .from("team_players")
-      .select("id, player_name, positions, jersey_number, status")
-      .eq("team_id", teamId)
-      .order("player_name", { ascending: true });
 
-    setPlayers(
-      (data ?? []).map((p) => ({
-        id: p.id as string,
-        name: p.player_name as string,
-        positions: (p.positions as string[] | null) ?? [],
-        jerseyNumber: (p.jersey_number as string | null) ?? null,
-        status: p.status as "active" | "inactive",
-      }))
-    );
+    // Try the richer projection first; degrade if is_injured (migration 43)
+    // or color_index (migration 45) isn't deployed yet so the screen still
+    // renders. Each newer column gets its own fallback rung.
+    const playersSelect = (withInjured: boolean, withColorIndex: boolean) =>
+      supabase
+        .from("team_players")
+        .select(
+          `id, player_name, positions, jersey_number, status, is_captain${
+            withInjured ? ", is_injured" : ""
+          }${withColorIndex ? ", color_index" : ""}`
+        )
+        .eq("team_id", teamId)
+        .order("player_name", { ascending: true });
+    const [playersResRaw, timedRes, ratedRes] = await Promise.all([
+      (async () => {
+        let res = await playersSelect(true, true);
+        if (res.error && /color_index/i.test(res.error.message)) {
+          res = await playersSelect(true, false);
+        }
+        if (res.error && /is_injured/i.test(res.error.message)) {
+          res = await playersSelect(false, false);
+        }
+        return res;
+      })(),
+      supabase
+        .from("benchmark_results")
+        .select(
+          "player_id, time_seconds, created_at, team_drills!inner(drill_name, benchmark_type)"
+        )
+        .eq("team_id", teamId)
+        .eq("team_drills.benchmark_type", "timed")
+        .not("time_seconds", "is", null)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("benchmark_results")
+        .select(
+          "player_id, rating, created_at, team_drills!inner(drill_name, benchmark_type)"
+        )
+        .eq("team_id", teamId)
+        .eq("team_drills.benchmark_type", "rated")
+        .not("rating", "is", null)
+        .order("created_at", { ascending: false }),
+    ]);
+
+    const playersRes = playersResRaw;
+    if (playersRes.error)
+      console.warn("[roster] players:", playersRes.error.message);
+    if (timedRes.error)
+      console.warn("[roster] timed benchmarks:", timedRes.error.message);
+    if (ratedRes.error)
+      console.warn("[roster] rated benchmarks:", ratedRes.error.message);
+
+    // Reduce to most recent timed / rated per player.
+    const latestTimed = new Map<
+      string,
+      { seconds: number; drill: string }
+    >();
+    ((timedRes.data ?? []) as RawBenchmark[]).forEach((row) => {
+      if (latestTimed.has(row.player_id)) return; // ordered desc, first wins
+      const drill = pickRelation(row.team_drills);
+      if (row.time_seconds === null) return;
+      latestTimed.set(row.player_id, {
+        seconds: Number(row.time_seconds),
+        drill: drill?.drill_name ?? "Timed drill",
+      });
+    });
+
+    const latestRated = new Map<
+      string,
+      { rating: number; drill: string }
+    >();
+    ((ratedRes.data ?? []) as RawBenchmark[]).forEach((row) => {
+      if (latestRated.has(row.player_id)) return;
+      const drill = pickRelation(row.team_drills);
+      if (row.rating === null) return;
+      latestRated.set(row.player_id, {
+        rating: row.rating,
+        drill: drill?.drill_name ?? "Rated drill",
+      });
+    });
+
+    const rows = ((playersRes.data ?? []) as unknown as RawPlayer[])
+      // Roster excludes captain-only auto-inserted rows from the bold dashboard's
+      // milestone count, but the roster list shows everyone. Keep all rows here.
+      .map<PlayerCardData>((p) => {
+        const t = latestTimed.get(p.id);
+        const r = latestRated.get(p.id);
+        return {
+          id: p.id,
+          name: p.player_name,
+          jerseyNumber: p.jersey_number,
+          positions: p.positions ?? [],
+          status: p.status,
+          colorIndex: p.color_index ?? null,
+          injured: p.is_injured === true,
+          isCaptain: p.is_captain === true,
+          timedSeconds: t ? t.seconds : null,
+          timedDrill: t ? t.drill : null,
+          rating: r ? r.rating : null,
+          ratedDrill: r ? r.drill : null,
+          // Streak + PR remain inert until per-player attendance + history pass
+          // are wired up (see plan: Phase 5 known gaps).
+          pr: false,
+          streak: 0,
+        };
+      });
+
+    setPlayers(rows);
   }, [teamId]);
 
   useEffect(() => {
@@ -212,10 +247,68 @@ export default function RosterScreen() {
     router.push("/roster/new" as never);
   };
 
-  const headerPaddingTop = insets.top + spacing.lg;
+  // Group + filter
+  const { offense, defense, bench, active, avgTimed, prCount } = useMemo(() => {
+    const off: PlayerCardData[] = [];
+    const def: PlayerCardData[] = [];
+    const bn: PlayerCardData[] = [];
+    let prs = 0;
+    const timedValues: number[] = [];
+    players.forEach((p) => {
+      if (p.status === "inactive") {
+        bn.push(p);
+        return;
+      }
+      const primary = p.positions[0];
+      const side = primary ? POSITION_SIDE[primary] : null;
+      if (side === "defense") def.push(p);
+      else off.push(p); // unset side falls back to offense bucket
+      if (p.pr) prs += 1;
+      if (p.timedSeconds !== null) timedValues.push(p.timedSeconds);
+    });
+    // QBs pin to the top of the offense bucket — they run the offense, so
+    // a coach scanning the list should see them first. Stable sort keeps
+    // existing alphabetical order intact otherwise (the upstream query
+    // already orders by player_name).
+    off.sort((a, b) => {
+      const aQb = a.positions[0] === "QB" ? 0 : 1;
+      const bQb = b.positions[0] === "QB" ? 0 : 1;
+      return aQb - bQb;
+    });
+    const avg =
+      timedValues.length > 0
+        ? timedValues.reduce((s, v) => s + v, 0) / timedValues.length
+        : null;
+    return {
+      offense: off,
+      defense: def,
+      bench: bn,
+      active: off.length + def.length,
+      avgTimed: avg,
+      prCount: prs,
+    };
+  }, [players]);
 
-  const active = players.filter((p) => p.status === "active");
-  const inactive = players.filter((p) => p.status === "inactive");
+  const visibleOffense =
+    filter === "all" || filter === "offense"
+      ? offense
+      : filter === "prs"
+      ? offense.filter((p) => p.pr)
+      : [];
+  const visibleDefense =
+    filter === "all" || filter === "defense"
+      ? defense
+      : filter === "prs"
+      ? defense.filter((p) => p.pr)
+      : [];
+  const visibleBench =
+    filter === "all" || filter === "bench"
+      ? bench
+      : filter === "prs"
+      ? bench.filter((p) => p.pr)
+      : [];
+
+  const openSlots = Math.max(0, ROSTER_CAP - active);
 
   if (loading) {
     return (
@@ -223,21 +316,24 @@ export default function RosterScreen() {
         style={{
           flex: 1,
           backgroundColor: colors.surface.base,
-          paddingHorizontal: spacing.xl,
-          paddingTop: headerPaddingTop,
+          paddingHorizontal: 16,
+          paddingTop: insets.top + 18,
         }}
       >
         <Text
-          style={{
-            fontSize: 20,
-            lineHeight: 28,
-            fontWeight: "500",
-            color: colors.text.primary,
-          }}
+          style={[
+            fontStyle("bold"),
+            {
+              fontSize: 24,
+              fontWeight: fontWeight.bold,
+              color: colors.text.primary,
+              letterSpacing: -0.4,
+            },
+          ]}
         >
           Roster
         </Text>
-        <View style={{ marginTop: spacing["2xl"], gap: spacing.sm }}>
+        <View style={{ marginTop: 24, gap: 10 }}>
           {[0, 1, 2, 3].map((i) => (
             <SkeletonCard key={i} />
           ))}
@@ -246,38 +342,221 @@ export default function RosterScreen() {
     );
   }
 
-  if (players.length === 0) {
-    return (
+  return (
+    <ScrollView
+      style={{ flex: 1, backgroundColor: colors.surface.base }}
+      contentContainerStyle={{
+        paddingTop: insets.top + 14,
+        paddingBottom: insets.bottom + 80,
+      }}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.orange[500]}
+        />
+      }
+    >
+      {/* Top header row */}
       <View
         style={{
-          flex: 1,
-          backgroundColor: colors.surface.base,
-          paddingHorizontal: spacing.xl,
-          paddingTop: headerPaddingTop,
+          flexDirection: "row",
+          alignItems: "center",
+          justifyContent: "space-between",
+          paddingHorizontal: 18,
+          paddingBottom: 2,
         }}
       >
-        <View
-          className="flex-row items-center justify-between"
-          style={{ marginBottom: spacing.xl }}
-        >
+        <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
           <Text
-            style={{
-              fontSize: 20,
-              lineHeight: 28,
-              fontWeight: "500",
-              color: colors.text.primary,
-            }}
+            numberOfLines={1}
+            style={[
+              fontStyle("bold"),
+              {
+                fontSize: 11,
+                fontWeight: fontWeight.bold,
+                color: colors.orange[500],
+                letterSpacing: tracking.loose,
+                textTransform: "uppercase",
+              },
+            ]}
+          >
+            {teamName ?? "Your team"}
+          </Text>
+          <Text
+            style={[
+              fontStyle("bold"),
+              {
+                fontSize: 24,
+                fontWeight: fontWeight.bold,
+                color: colors.text.primary,
+                letterSpacing: -0.4,
+              },
+            ]}
           >
             Roster
           </Text>
         </View>
+        <View style={{ flexDirection: "row", gap: 8 }}>
+          <TouchableOpacity
+            accessibilityLabel="Search"
+            activeOpacity={0.85}
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 12,
+              backgroundColor: colors.surface.raised,
+              borderWidth: 1,
+              borderColor: colors.border.default,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Ionicons name="search" size={16} color={colors.text.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={goToNew}
+            accessibilityLabel="Add player"
+            activeOpacity={0.85}
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 12,
+              backgroundColor: colors.orange[500],
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Ionicons name="add" size={18} color={colors.text.primary} />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Squad summary strip */}
+      <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
         <View
           style={{
-            flex: 1,
+            padding: 14,
+            backgroundColor: colors.surface.raised,
+            borderWidth: 1,
+            borderColor: colors.border.subtle,
+            borderRadius: radius.xl,
+            flexDirection: "row",
             alignItems: "center",
-            justifyContent: "center",
-            gap: spacing.lg,
-            paddingBottom: 80,
+          }}
+        >
+          <View style={{ flex: 1.4, gap: 2 }}>
+            <View
+              style={{ flexDirection: "row", alignItems: "baseline", gap: 3 }}
+            >
+              <MonoText
+                weight="bold"
+                style={{
+                  fontSize: 24,
+                  fontWeight: fontWeight.bold,
+                  color: colors.text.primary,
+                  letterSpacing: -0.5,
+                  lineHeight: 26,
+                }}
+              >
+                {active}
+              </MonoText>
+              <MonoText
+                weight="medium"
+                style={{ fontSize: 12, color: colors.text.secondary }}
+              >
+                /{ROSTER_CAP}
+              </MonoText>
+            </View>
+            <Text
+              style={[
+                fontStyle("bold"),
+                {
+                  fontSize: 9.5,
+                  fontWeight: fontWeight.bold,
+                  color: colors.text.muted,
+                  letterSpacing: tracking.loose,
+                  textTransform: "uppercase",
+                },
+              ]}
+            >
+              Active
+            </Text>
+          </View>
+          <SummaryCell
+            big={offense.length}
+            label="OFF"
+            color={colors.orange[500]}
+          />
+          <SummaryCell
+            big={defense.length}
+            label="DEF"
+            color={colors.red.semantic}
+          />
+          <SummaryCell
+            big={avgTimed !== null ? avgTimed.toFixed(1) : "—"}
+            unit={avgTimed !== null ? "s" : undefined}
+            label="AVG"
+            color={avgTimed !== null ? colors.lime[400] : colors.text.muted}
+          />
+        </View>
+      </View>
+
+      {/* Filter pills */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingHorizontal: 16,
+          paddingTop: 14,
+          paddingBottom: 4,
+          gap: 6,
+        }}
+      >
+        <FilterPill
+          label="All"
+          count={active + bench.length}
+          active={filter === "all"}
+          onPress={() => setFilter("all")}
+        />
+        <FilterPill
+          label="Offense"
+          count={offense.length}
+          active={filter === "offense"}
+          color={colors.orange[500]}
+          onPress={() => setFilter("offense")}
+        />
+        <FilterPill
+          label="Defense"
+          count={defense.length}
+          active={filter === "defense"}
+          color={colors.red.semantic}
+          onPress={() => setFilter("defense")}
+        />
+        <FilterPill
+          label="Bench"
+          count={bench.length}
+          active={filter === "bench"}
+          onPress={() => setFilter("bench")}
+        />
+        <FilterPill
+          label="PRs"
+          count={prCount}
+          active={filter === "prs"}
+          icon="flash"
+          onPress={() => setFilter("prs")}
+        />
+      </ScrollView>
+
+      {/* Empty state — no players at all */}
+      {players.length === 0 ? (
+        <View
+          style={{
+            paddingHorizontal: 16,
+            paddingTop: 40,
+            alignItems: "center",
+            gap: 16,
           }}
         >
           <View
@@ -285,144 +564,372 @@ export default function RosterScreen() {
               width: 64,
               height: 64,
               borderRadius: 32,
-              backgroundColor: "rgba(255,255,255,0.03)",
+              backgroundColor: colors.surface.raised,
               borderWidth: 1,
-              borderColor: "rgba(255,255,255,0.06)",
+              borderColor: colors.border.subtle,
               alignItems: "center",
               justifyContent: "center",
             }}
           >
-            <Ionicons
-              name="people-outline"
-              size={28}
-              color="rgba(255,255,255,0.30)"
-            />
+            <Ionicons name="people-outline" size={28} color={colors.text.muted} />
           </View>
           <Text
+            style={[
+              fontStyle("regular"),
+              {
+                fontSize: 14,
+                color: colors.text.secondary,
+                textAlign: "center",
+                maxWidth: 260,
+                lineHeight: 20,
+              },
+            ]}
+          >
+            No players yet. Add your first player to start building the squad.
+          </Text>
+          <TouchableOpacity
+            onPress={goToNew}
+            activeOpacity={0.9}
             style={{
-              fontSize: 15,
-              lineHeight: 22,
-              color: colors.text.secondary,
-              textAlign: "center",
-              maxWidth: 260,
+              paddingHorizontal: 18,
+              height: 44,
+              borderRadius: 12,
+              backgroundColor: colors.orange[500],
+              flexDirection: "row",
+              alignItems: "center",
+              gap: 6,
             }}
           >
-            No players yet. Add your first player to get started.
-          </Text>
-          <Button label="Add Player" onPress={goToNew} fullWidth={false} />
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <View style={{ flex: 1, backgroundColor: colors.surface.base }}>
-      <View
-        className="flex-row items-center justify-between"
-        style={{
-          paddingTop: headerPaddingTop,
-          paddingHorizontal: spacing.xl,
-          paddingBottom: spacing.md,
-        }}
-      >
-        <Text
-          style={{
-            fontSize: 20,
-            lineHeight: 28,
-            fontWeight: "500",
-            color: colors.text.primary,
-          }}
-        >
-          Roster
-        </Text>
-        <Pressable
-          onPress={goToNew}
-          accessibilityLabel="Add player"
-          hitSlop={10}
-          style={({ pressed }) => ({
-            width: 36,
-            height: 36,
-            borderRadius: 18,
-            backgroundColor: pressed
-              ? "rgba(212,138,48,0.20)"
-              : "rgba(212,138,48,0.12)",
-            borderWidth: 1,
-            borderColor: "rgba(212,138,48,0.30)",
-            alignItems: "center",
-            justifyContent: "center",
-          })}
-        >
-          <Ionicons name="add" size={20} color={colors.orange[500]} />
-        </Pressable>
-      </View>
-
-      <FlatList
-        data={[]}
-        keyExtractor={() => "noop"}
-        renderItem={null as never}
-        contentContainerStyle={{
-          paddingHorizontal: spacing.xl,
-          paddingBottom: spacing["3xl"] + 72,
-        }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor={colors.orange[500]}
-          />
-        }
-        ListHeaderComponent={
-          <View>
+            <Ionicons name="add" size={16} color={colors.text.primary} />
             <Text
+              style={[
+                fontStyle("bold"),
+                {
+                  fontSize: 14,
+                  fontWeight: fontWeight.bold,
+                  color: colors.text.primary,
+                  letterSpacing: 0.2,
+                },
+              ]}
+            >
+              Add player
+            </Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <>
+          {/* Groups */}
+          {visibleOffense.length > 0 ? (
+            <>
+              {filter === "all" ? (
+                <GroupHeader
+                  label="OFFENSE"
+                  count={visibleOffense.length}
+                  color={colors.orange[500]}
+                />
+              ) : null}
+              <View style={{ paddingHorizontal: 16, gap: 10 }}>
+                {visibleOffense.map((p) => (
+                  <PlayerCard
+                    key={p.id}
+                    player={p}
+                    onPress={() => goToPlayer(p.id)}
+                  />
+                ))}
+              </View>
+            </>
+          ) : null}
+
+          {visibleDefense.length > 0 ? (
+            <>
+              {filter === "all" ? (
+                <GroupHeader
+                  label="DEFENSE"
+                  count={visibleDefense.length}
+                  color={colors.red.semantic}
+                />
+              ) : null}
+              <View style={{ paddingHorizontal: 16, gap: 10 }}>
+                {visibleDefense.map((p) => (
+                  <PlayerCard
+                    key={p.id}
+                    player={p}
+                    onPress={() => goToPlayer(p.id)}
+                  />
+                ))}
+              </View>
+            </>
+          ) : null}
+
+          {visibleBench.length > 0 ? (
+            <>
+              {filter === "all" || filter === "bench" ? (
+                <GroupHeader
+                  label="BENCH"
+                  count={visibleBench.length}
+                  color={colors.text.muted}
+                />
+              ) : null}
+              <View style={{ paddingHorizontal: 16, gap: 10 }}>
+                {visibleBench.map((p) => (
+                  <PlayerCard
+                    key={p.id}
+                    player={p}
+                    onPress={() => goToPlayer(p.id)}
+                    dim
+                  />
+                ))}
+              </View>
+            </>
+          ) : null}
+
+          {/* Ghost add row */}
+          <View style={{ paddingHorizontal: 16, paddingTop: 14 }}>
+            <TouchableOpacity
+              onPress={goToNew}
+              activeOpacity={0.85}
+              accessibilityLabel="Add player"
               style={{
-                fontSize: 11,
-                letterSpacing: 0.8,
-                textTransform: "uppercase",
-                color: colors.text.secondary,
-                fontWeight: "500",
-                marginBottom: spacing.md,
+                padding: 14,
+                borderRadius: 14,
+                borderWidth: 1,
+                borderStyle: "dashed",
+                borderColor: colors.orange.tintBorder,
+                backgroundColor: "rgba(255,106,26,0.04)",
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 12,
               }}
             >
-              Active ({active.length})
-            </Text>
-            <View style={{ gap: spacing.sm }}>
-              {active.map((p) => (
-                <PlayerRow
-                  key={p.id}
-                  player={p}
-                  onPress={() => goToPlayer(p.id)}
-                />
-              ))}
-            </View>
-
-            {inactive.length > 0 ? (
-              <View style={{ marginTop: spacing["2xl"] }}>
-                <Text
-                  style={{
-                    fontSize: 11,
-                    letterSpacing: 0.8,
-                    textTransform: "uppercase",
-                    color: colors.text.secondary,
-                    fontWeight: "500",
-                    marginBottom: spacing.md,
-                  }}
-                >
-                  Inactive ({inactive.length})
-                </Text>
-                <View style={{ gap: spacing.sm }}>
-                  {inactive.map((p) => (
-                    <PlayerRow
-                      key={p.id}
-                      player={p}
-                      onPress={() => goToPlayer(p.id)}
-                      inactive
-                    />
-                  ))}
-                </View>
+              <View
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
+                  backgroundColor: colors.orange.tint,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Ionicons name="add" size={16} color={colors.orange[500]} />
               </View>
-            ) : null}
+              <View style={{ flex: 1, gap: 2 }}>
+                <Text
+                  style={[
+                    fontStyle("semibold"),
+                    {
+                      fontSize: 13,
+                      fontWeight: fontWeight.semibold,
+                      color: colors.text.primary,
+                    },
+                  ]}
+                >
+                  Add player
+                </Text>
+                <Text
+                  style={[
+                    fontStyle("regular"),
+                    { fontSize: 11, color: colors.text.muted },
+                  ]}
+                >
+                  {openSlots > 0
+                    ? `${openSlots} open slot${openSlots === 1 ? "" : "s"} · roster cap ${ROSTER_CAP}`
+                    : `Roster full at ${ROSTER_CAP}`}
+                </Text>
+              </View>
+              <Ionicons
+                name="chevron-forward"
+                size={14}
+                color={colors.text.muted}
+              />
+            </TouchableOpacity>
           </View>
-        }
+        </>
+      )}
+    </ScrollView>
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+
+function SummaryCell({
+  big,
+  unit,
+  label,
+  color,
+}: {
+  big: number | string;
+  unit?: string;
+  label: string;
+  color: string;
+}) {
+  return (
+    <View style={{ flex: 1, alignItems: "flex-start", gap: 2 }}>
+      <View style={{ flexDirection: "row", alignItems: "baseline", gap: 2 }}>
+        <MonoText
+          weight="bold"
+          style={{
+            fontSize: 22,
+            fontWeight: fontWeight.bold,
+            color,
+            letterSpacing: -0.5,
+            lineHeight: 24,
+          }}
+        >
+          {big}
+        </MonoText>
+        {unit ? (
+          <MonoText
+            weight="medium"
+            style={{ fontSize: 11, color: colors.text.secondary }}
+          >
+            {unit}
+          </MonoText>
+        ) : null}
+      </View>
+      <Text
+        style={[
+          fontStyle("bold"),
+          {
+            fontSize: 9.5,
+            fontWeight: fontWeight.bold,
+            color: colors.text.muted,
+            letterSpacing: tracking.loose,
+            textTransform: "uppercase",
+          },
+        ]}
+      >
+        {label}
+      </Text>
+    </View>
+  );
+}
+
+function FilterPill({
+  label,
+  count,
+  active,
+  color,
+  icon,
+  onPress,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  color?: string;
+  icon?: keyof typeof Ionicons.glyphMap;
+  onPress: () => void;
+}) {
+  const textColor = active
+    ? colors.surface.base
+    : color ?? colors.text.primary;
+  return (
+    <TouchableOpacity
+      onPress={() => {
+        lightHaptic();
+        onPress();
+      }}
+      activeOpacity={0.85}
+      style={{
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: radius.pill,
+        backgroundColor: active ? colors.text.primary : colors.surface.raised,
+        borderWidth: active ? 0 : 1,
+        borderColor: colors.border.default,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+      }}
+    >
+      {icon ? (
+        <Ionicons
+          name={icon}
+          size={11}
+          color={active ? colors.surface.base : colors.lime[400]}
+        />
+      ) : null}
+      <Text
+        style={[
+          fontStyle("bold"),
+          {
+            fontSize: 12,
+            fontWeight: fontWeight.bold,
+            color: textColor,
+            letterSpacing: 0.1,
+          },
+        ]}
+      >
+        {label}
+      </Text>
+      <MonoText
+        weight="medium"
+        style={{
+          fontSize: 10,
+          color: active ? "rgba(8,9,11,0.55)" : colors.text.muted,
+        }}
+      >
+        {count}
+      </MonoText>
+    </TouchableOpacity>
+  );
+}
+
+function GroupHeader({
+  label,
+  count,
+  color,
+}: {
+  label: string;
+  count: number;
+  color: string;
+}) {
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+        paddingHorizontal: 18,
+        paddingTop: 20,
+        paddingBottom: 10,
+      }}
+    >
+      <View
+        style={{
+          width: 4,
+          height: 12,
+          borderRadius: 2,
+          backgroundColor: color,
+        }}
+      />
+      <Text
+        style={[
+          fontStyle("bold"),
+          {
+            fontSize: 11,
+            fontWeight: fontWeight.bold,
+            color: colors.text.primary,
+            letterSpacing: tracking.loose,
+            textTransform: "uppercase",
+          },
+        ]}
+      >
+        {label}
+      </Text>
+      <MonoText
+        weight="medium"
+        style={{ fontSize: 11, color: colors.text.muted }}
+      >
+        {count}
+      </MonoText>
+      <View
+        style={{
+          flex: 1,
+          height: 1,
+          backgroundColor: colors.border.subtle,
+          marginLeft: 4,
+        }}
       />
     </View>
   );

@@ -3,10 +3,11 @@ import { ActivityIndicator, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DrillForm } from "../../../components/DrillForm";
 import { colors } from "../../../constants/design";
-import { supabase } from "../../../lib/supabase";
+import { loadDrillCategories } from "../../../lib/load-categories";
 import { useTeam } from "../../../lib/team-context";
+import type { CategoryType } from "../../../constants/categories";
 
-type Category = { id: string; name: string };
+type Category = { id: string; name: string; type: CategoryType | null };
 
 export default function NewDrillScreen() {
   const insets = useSafeAreaInsets();
@@ -19,18 +20,14 @@ export default function NewDrillScreen() {
     let cancelled = false;
     if (!teamId) return;
     (async () => {
-      const { data } = await supabase
-        .from("drill_categories")
-        .select("id, category_name, display_order")
-        .or(`team_id.is.null,team_id.eq.${teamId}`)
-        .order("display_order", { ascending: true })
-        .order("category_name", { ascending: true });
+      const rows = await loadDrillCategories(teamId);
 
       if (cancelled) return;
       setCategories(
-        (data ?? []).map((c) => ({
-          id: c.id as string,
-          name: c.category_name as string,
+        rows.map((c) => ({
+          id: c.id,
+          name: c.name,
+          type: c.type,
         }))
       );
       setLoading(false);

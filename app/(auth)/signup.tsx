@@ -36,6 +36,10 @@ export default function SignupScreen() {
 
     setSubmitting(true);
 
+    // Clear any session left in SecureStore from a previous account so a
+    // brand-new signup can't get shadowed by stale auth state.
+    await supabase.auth.signOut();
+
     const trimmedEmail = email.trim();
     const { data, error: signUpError } = await supabase.auth.signUp({
       email: trimmedEmail,
@@ -44,6 +48,18 @@ export default function SignupScreen() {
 
     if (signUpError) {
       setError(signUpError.message);
+      setSubmitting(false);
+      return;
+    }
+
+    // Supabase's email-enumeration protection: if the email is already
+    // registered, signUp silently succeeds with data.user.identities = [].
+    // Detect that and tell the user, instead of showing the misleading
+    // "check your email" UI.
+    if (data.user && (data.user.identities?.length ?? 0) === 0) {
+      setError(
+        "An account with this email already exists. Try signing in instead."
+      );
       setSubmitting(false);
       return;
     }

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Animated,
   Easing,
-  FlatList,
   Modal,
   Pressable,
   RefreshControl,
@@ -14,32 +13,70 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Tag } from "../../../components/ui/Tag";
 import { Button } from "../../../components/ui/Button";
-import { colors, radius, spacing } from "../../../constants/design";
+import { Card } from "../../../components/ui/Card";
+import { Eyebrow } from "../../../components/ui/Eyebrow";
+import { PhaseChip } from "../../../components/DrillForm";
+import { colors, radius, spacing, tracking } from "../../../constants/design";
+import { fontStyle, monoStyle } from "../../../constants/typography";
+import {
+  CategoryType,
+  colorForCategory,
+  inferCategoryType,
+  normalizeCategory,
+  tintForCategory,
+} from "../../../constants/categories";
 import { supabase } from "../../../lib/supabase";
+import { loadDrillCategories } from "../../../lib/load-categories";
 import { useTeam } from "../../../lib/team-context";
 import { useAuth } from "../../../lib/auth-context";
 
 const ALL = "__all__";
 
-type Category = { id: string; name: string };
+type Category = {
+  id: string;
+  name: string;
+  type: CategoryType;
+  color: string;
+};
+
+// Widen to accept both legacy and migration-38 vocabularies. The filter UI
+// in this screen only recognises the legacy four; new types still load and
+// count as "benchmark drill", they just won't match the chip filters until
+// the library filter row is redesigned.
+type BenchmarkKind =
+  | "timed"
+  | "rated"
+  | "reps_complete"
+  | "percentage"
+  | "reps"
+  | "pct"
+  | "flags"
+  | "drops";
 
 type Drill = {
   id: string;
   name: string;
   status: "draft" | "published";
-  benchmarkType: "timed" | "rated" | null;
+  benchmarkTypes: BenchmarkKind[];
   categoryIds: string[];
   categoryNames: string[];
+  durationMin: number | null;
+  reps: number | null;
   createdAt: string;
 };
 
 type StatusFilter = "all" | "draft" | "published";
-type BenchmarkFilter = "all" | "timed" | "rated" | "none";
+type BenchmarkFilter =
+  | "all"
+  | "timed"
+  | "rated"
+  | "reps_complete"
+  | "percentage"
+  | "none";
 type SortOption = "name_asc" | "recent";
 
-function SkeletonCard() {
+function SkeletonRow() {
   const [opacity] = useState(new Animated.Value(0.3));
   useEffect(() => {
     const loop = Animated.loop(
@@ -65,8 +102,8 @@ function SkeletonCard() {
   return (
     <Animated.View
       style={{
-        height: 88,
-        borderRadius: radius.lg,
+        height: 64,
+        borderRadius: radius.md,
         backgroundColor: colors.surface.raised,
         opacity,
       }}
@@ -74,90 +111,508 @@ function SkeletonCard() {
   );
 }
 
-function CategoryTag({ name }: { name: string }) {
+function HeaderIconButton({
+  icon,
+  variant,
+  onPress,
+  accessibilityLabel,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>["name"];
+  variant: "solid" | "primary";
+  onPress: () => void;
+  accessibilityLabel: string;
+}) {
+  const isPrimary = variant === "primary";
   return (
-    <View
-      style={{
-        paddingHorizontal: 10,
-        paddingVertical: 3,
-        borderRadius: radius.pill,
-        backgroundColor: colors.surface.elevated,
-        borderWidth: 1,
-        borderColor: colors.border.card,
-      }}
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      hitSlop={6}
     >
+      {({ pressed }) => (
+        <View
+          style={{
+            width: 36,
+            height: 36,
+            borderRadius: radius.lg,
+            backgroundColor: isPrimary
+              ? colors.orange[500]
+              : colors.surface.raised,
+            borderWidth: 1,
+            borderColor: isPrimary
+              ? colors.orange[500]
+              : colors.border.card,
+            alignItems: "center",
+            justifyContent: "center",
+            opacity: pressed ? 0.85 : 1,
+            transform: [{ scale: pressed ? 0.96 : 1 }],
+          }}
+        >
+          <Ionicons
+            name={icon}
+            size={16}
+            color={isPrimary ? colors.text.onBrand : colors.text.primary}
+          />
+        </View>
+      )}
+    </Pressable>
+  );
+}
+
+function SquadBar({
+  label,
+  count,
+  color,
+}: {
+  label: string;
+  count: number;
+  color: string;
+}) {
+  return (
+    <View style={{ alignItems: "flex-end", gap: 2 }}>
       <Text
-        style={{
-          fontSize: 11,
-          letterSpacing: 0.5,
-          textTransform: "uppercase",
-          color: colors.text.label,
-          fontWeight: "500",
-        }}
+        style={[
+          monoStyle("bold"),
+          { fontSize: 18, color, letterSpacing: -0.36, lineHeight: 20 },
+        ]}
       >
-        {name}
+        {count}
+      </Text>
+      <Text
+        style={[
+          monoStyle("bold"),
+          {
+            fontSize: 9,
+            color: colors.text.muted,
+            letterSpacing: 1.1,
+          },
+        ]}
+      >
+        {label}
       </Text>
     </View>
   );
 }
 
-function BenchmarkBadge({ type }: { type: "timed" | "rated" }) {
+// Column geometry — kept in sync between TableHeader and DrillRow so
+// labels (DUR / REPS) sit directly above their values.
+const COL_BENCH_W = 56;
+const COL_REPS_W = 48;
+const COL_CHEVRON_W = 14;
+const COL_GAP = 10;
+
+function PhaseSectionHeader({
+  label,
+  color,
+  count,
+}: {
+  label: string;
+  color: string;
+  count: number;
+}) {
+  const accent = color;
   return (
     <View
       style={{
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: radius.pill,
-        backgroundColor: colors.orange[600],
-        borderWidth: 1,
-        borderColor: colors.orange[500],
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        paddingHorizontal: spacing.lg,
+        paddingTop: spacing.md,
+        paddingBottom: spacing.sm,
       }}
     >
       <Text
-        style={{
-          fontSize: 11,
-          letterSpacing: 0.5,
-          textTransform: "uppercase",
-          color: colors.orange[400],
-          fontWeight: "500",
-        }}
+        style={[
+          fontStyle("bold"),
+          {
+            fontSize: 12,
+            letterSpacing: tracking.loose,
+            textTransform: "uppercase",
+            color: accent,
+          },
+        ]}
       >
-        {type}
+        {label}
+      </Text>
+      <Text
+        style={[
+          monoStyle("medium"),
+          {
+            fontSize: 11,
+            color: colors.text.muted,
+            letterSpacing: 0.4,
+          },
+        ]}
+      >
+        {count} {count === 1 ? "drill" : "drills"}
       </Text>
     </View>
   );
 }
 
-function DraftBadge() {
+function TableHeader() {
   return (
     <View
       style={{
-        paddingHorizontal: 10,
-        paddingVertical: 3,
-        borderRadius: radius.pill,
-        backgroundColor: colors.surface.elevated,
-        borderWidth: 1,
-        borderColor: "rgba(255,255,255,0.30)",
-        borderStyle: "dashed",
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: spacing.lg,
+        paddingVertical: 10,
+        gap: COL_GAP,
+        backgroundColor: colors.surface.overlay,
       }}
     >
       <Text
-        style={{
-          fontSize: 11,
-          fontWeight: "500",
-          color: colors.text.label,
-        }}
+        style={[
+          fontStyle("bold"),
+          {
+            flex: 1,
+            fontSize: 9.5,
+            letterSpacing: 1.4,
+            textTransform: "uppercase",
+            color: colors.text.muted,
+          },
+        ]}
       >
-        Draft
+        Drill
       </Text>
+      <Text
+        style={[
+          monoStyle("bold"),
+          {
+            width: COL_BENCH_W,
+            fontSize: 9.5,
+            letterSpacing: 1.4,
+            textTransform: "uppercase",
+            color: colors.text.muted,
+            textAlign: "right",
+          },
+        ]}
+      >
+        Dur
+      </Text>
+      <Text
+        style={[
+          monoStyle("bold"),
+          {
+            width: COL_REPS_W,
+            fontSize: 9.5,
+            letterSpacing: 1.4,
+            textTransform: "uppercase",
+            color: colors.text.muted,
+            textAlign: "right",
+          },
+        ]}
+      >
+        Reps
+      </Text>
+      <View style={{ width: COL_CHEVRON_W }} />
     </View>
+  );
+}
+
+function DrillRow({
+  drill,
+  byId,
+  onPress,
+}: {
+  drill: Drill;
+  byId: Map<string, Category>;
+  onPress: () => void;
+}) {
+  // Phases live in the section header — the row's left-edge accent bar
+  // mirrors that phase color so a glance down the list reinforces which
+  // section the row belongs to. Skill / sub-skill pills still render inside
+  // the card. Drills with no phase tagged fall back to violet (a hue we
+  // don't use elsewhere) so "no phase yet" reads as its own distinct state.
+  const allLinked = drill.categoryIds
+    .map((id) => byId.get(id))
+    .filter((c): c is Category => !!c);
+  const phase = allLinked.find((c) => c.type === "phase");
+  const linked = allLinked.filter((c) => c.type !== "phase");
+  const accentColor = phase?.color ?? colors.team.violet;
+
+  return (
+    <Pressable onPress={onPress}>
+      {({ pressed }) => (
+        <View
+          style={{
+            flexDirection: "row",
+            alignItems: "stretch",
+            borderTopWidth: 1,
+            borderTopColor: colors.border.subtle,
+            opacity: pressed ? 0.85 : 1,
+          }}
+        >
+          {/* Left divider in skill color — short bar centered vertically */}
+          <View
+            style={{
+              width: spacing.lg,
+              alignItems: "center",
+              justifyContent: "center",
+              paddingVertical: spacing.md,
+            }}
+          >
+            <View
+              style={{
+                width: 3,
+                flex: 1,
+                borderRadius: 2,
+                backgroundColor: accentColor,
+              }}
+            />
+          </View>
+
+          <View
+            style={{
+              flex: 1,
+              flexDirection: "row",
+              alignItems: "center",
+              paddingRight: spacing.lg,
+              paddingVertical: spacing.lg,
+              gap: COL_GAP,
+            }}
+          >
+            {/* Name + pill row + sub-skill row */}
+            <View style={{ flex: 1, minWidth: 0, gap: spacing.sm }}>
+              {/* Title row */}
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
+                <Text
+                  style={[
+                    fontStyle("bold"),
+                    {
+                      fontSize: 14,
+                      color: colors.text.primary,
+                      flexShrink: 1,
+                    },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {drill.name}
+                </Text>
+                {drill.status === "draft" && (
+                  <View
+                    style={{
+                      paddingHorizontal: 5,
+                      paddingVertical: 1,
+                      borderRadius: 3,
+                      borderWidth: 1,
+                      borderColor: colors.border.dashed,
+                      borderStyle: "dashed",
+                    }}
+                  >
+                    <Text
+                      style={[
+                        fontStyle("bold"),
+                        {
+                          fontSize: 9,
+                          letterSpacing: 1,
+                          textTransform: "uppercase",
+                          color: colors.text.secondary,
+                        },
+                      ]}
+                    >
+                      Draft
+                    </Text>
+                  </View>
+                )}
+                {drill.benchmarkTypes.length > 0 && (
+                  <View
+                    accessibilityLabel="Benchmark drill"
+                    style={{
+                      paddingHorizontal: 7,
+                      paddingVertical: 2,
+                      borderRadius: 4,
+                      backgroundColor: "rgba(255, 77, 77, 0.14)",
+                    }}
+                  >
+                    <Text
+                      style={[
+                        fontStyle("bold"),
+                        {
+                          fontSize: 9.5,
+                          letterSpacing: 0.6,
+                          textTransform: "uppercase",
+                          color: colors.red.semantic,
+                        },
+                      ]}
+                    >
+                      Bench
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Skills row — every linked skill / sub-skill renders as a
+                  filled tinted pill. Wraps to the next line when there are
+                  enough to push the right-hand columns. */}
+              {linked.length > 0 && (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: 5,
+                  }}
+                >
+                  {linked.map((c) => (
+                    <View
+                      key={c.id}
+                      style={{
+                        paddingHorizontal: 7,
+                        paddingVertical: 2,
+                        borderRadius: 4,
+                        backgroundColor: tintForCategory(c.name),
+                      }}
+                    >
+                      <Text
+                        style={[
+                          fontStyle("bold"),
+                          {
+                            fontSize: 9.5,
+                            letterSpacing: 0.6,
+                            textTransform: "uppercase",
+                            color: c.color,
+                          },
+                        ]}
+                      >
+                        {c.name}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+
+            {/* DURATION column */}
+            <View style={{ width: COL_BENCH_W, alignItems: "flex-end" }}>
+              {drill.durationMin != null && drill.durationMin > 0 ? (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "baseline",
+                    gap: 2,
+                  }}
+                >
+                  <Text
+                    style={[
+                      monoStyle("bold"),
+                      {
+                        fontSize: 13,
+                        color: colors.text.primary,
+                        letterSpacing: -0.2,
+                      },
+                    ]}
+                  >
+                    {drill.durationMin}
+                  </Text>
+                  <Text
+                    style={[
+                      monoStyle("medium"),
+                      {
+                        fontSize: 10,
+                        color: colors.text.muted,
+                        letterSpacing: 0.4,
+                      },
+                    ]}
+                  >
+                    m
+                  </Text>
+                </View>
+              ) : (
+                <Text
+                  style={[
+                    monoStyle("medium"),
+                    {
+                      fontSize: 11,
+                      color: colors.text.muted,
+                      letterSpacing: 0.4,
+                    },
+                  ]}
+                >
+                  —
+                </Text>
+              )}
+            </View>
+
+            {/* REPS column */}
+            <View
+              style={{ width: COL_REPS_W, alignItems: "flex-end" }}
+            >
+              {drill.reps != null && drill.reps > 0 ? (
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "baseline",
+                    gap: 2,
+                  }}
+                >
+                  <Text
+                    style={[
+                      monoStyle("bold"),
+                      {
+                        fontSize: 13,
+                        color: colors.text.primary,
+                        letterSpacing: -0.2,
+                      },
+                    ]}
+                  >
+                    {drill.reps}
+                  </Text>
+                  <Text
+                    style={[
+                      monoStyle("medium"),
+                      {
+                        fontSize: 10,
+                        color: colors.text.muted,
+                        letterSpacing: 0.4,
+                      },
+                    ]}
+                  >
+                    ×
+                  </Text>
+                </View>
+              ) : (
+                <Text
+                  style={[
+                    monoStyle("medium"),
+                    {
+                      fontSize: 11,
+                      color: colors.text.muted,
+                      letterSpacing: 0.4,
+                    },
+                  ]}
+                >
+                  —
+                </Text>
+              )}
+            </View>
+
+            {/* Chevron */}
+            <Ionicons
+              name="chevron-forward"
+              size={COL_CHEVRON_W}
+              color={colors.text.muted}
+            />
+          </View>
+        </View>
+      )}
+    </Pressable>
   );
 }
 
 export default function DrillListScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { teamId } = useTeam();
+  const { teamId, teamName, teamFormat } = useTeam();
   const { user } = useAuth();
   const userId = user?.id;
 
@@ -165,45 +620,55 @@ export default function DrillListScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [drills, setDrills] = useState<Drill[]>([]);
-  const [activeCategory, setActiveCategory] = useState<string>(ALL);
+  const [activeSkill, setActiveSkill] = useState<string>(ALL);
   const [activeStatus, setActiveStatus] = useState<StatusFilter>("all");
   const [activeBenchmark, setActiveBenchmark] = useState<BenchmarkFilter>("all");
   const [sortBy, setSortBy] = useState<SortOption>("name_asc");
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
 
   const load = useCallback(async () => {
     if (!teamId) return;
-    const [categoriesRes, drillsRes] = await Promise.all([
-      supabase
-        .from("drill_categories")
-        .select("id, category_name, display_order")
-        .or(`team_id.is.null,team_id.eq.${teamId}`)
-        .order("display_order", { ascending: true })
-        .order("category_name", { ascending: true }),
-      supabase
-        .from("team_drills")
-        .select(
-          "id, drill_name, status, benchmark_type, created_by, created_at, team_drill_categories(category_id)"
-        )
-        .eq("team_id", teamId)
-        .order("drill_name", { ascending: true }),
+    const [categoryRowsRaw, drillsRes] = await Promise.all([
+      loadDrillCategories(teamId),
+      (async (): Promise<{ data: any[] | null; error: { message: string } | null }> => {
+        let res: { data: any[] | null; error: { message: string } | null } =
+          await supabase
+            .from("team_drills")
+            .select(
+              "id, drill_name, status, benchmark_type, benchmark_types, default_reps, default_duration_min, created_by, created_at, team_drill_categories(category_id)"
+            )
+            .eq("team_id", teamId)
+            .order("drill_name", { ascending: true });
+        if (res.error && /benchmark_types/i.test(res.error.message)) {
+          res = await supabase
+            .from("team_drills")
+            .select(
+              "id, drill_name, status, benchmark_type, default_reps, default_duration_min, created_by, created_at, team_drill_categories(category_id)"
+            )
+            .eq("team_id", teamId)
+            .order("drill_name", { ascending: true });
+        }
+        return res;
+      })(),
     ]);
 
     if (drillsRes.error) {
       console.warn("[drills] load error:", drillsRes.error.message);
     }
 
-    const categoryRows: Category[] = (categoriesRes.data ?? []).map((c) => ({
-      id: c.id as string,
-      name: c.category_name as string,
+    const categoryRows: Category[] = categoryRowsRaw.map((c) => ({
+      id: c.id,
+      name: c.name,
+      type: c.type ?? inferCategoryType(c.name),
+      color: colorForCategory(c.name),
     }));
-    const nameById = new Map(categoryRows.map((c) => [c.id, c.name]));
+    const byId = new Map(categoryRows.map((c) => [c.id, c]));
 
     const drillRows: Drill[] = (drillsRes.data ?? [])
       .filter((d) => {
-        // Show all published drills + only the current user's own drafts.
         if (d.status === "published") return true;
         if (d.status === "draft") return d.created_by === userId;
         return false;
@@ -213,29 +678,32 @@ export default function DrillListScreen() {
           (d.team_drill_categories as { category_id: string }[] | null) ?? [];
         const ids = links.map((l) => l.category_id);
         const names = ids
-          .map((id) => nameById.get(id))
+          .map((id) => byId.get(id)?.name)
           .filter((n): n is string => !!n);
         return {
           id: d.id as string,
           name: d.drill_name as string,
           status: d.status as "draft" | "published",
-          benchmarkType:
-            (d.benchmark_type as "timed" | "rated" | null) ?? null,
+          benchmarkTypes:
+            (d.benchmark_types as BenchmarkKind[] | null) ??
+            (d.benchmark_type
+              ? [d.benchmark_type as BenchmarkKind]
+              : []),
           categoryIds: ids,
           categoryNames: names,
+          durationMin:
+            typeof d.default_duration_min === "number"
+              ? (d.default_duration_min as number)
+              : null,
+          reps:
+            typeof d.default_reps === "number"
+              ? (d.default_reps as number)
+              : null,
           createdAt: (d.created_at as string) ?? "",
         };
       });
 
-    const usedCategoryIds = new Set<string>();
-    for (const d of drillRows) {
-      for (const id of d.categoryIds) usedCategoryIds.add(id);
-    }
-    const usedCategories = categoryRows.filter((c) =>
-      usedCategoryIds.has(c.id)
-    );
-
-    setCategories(usedCategories);
+    setCategories(categoryRows);
     setDrills(drillRows);
   }, [teamId, userId]);
 
@@ -250,8 +718,6 @@ export default function DrillListScreen() {
     };
   }, [load]);
 
-  // Reload every time the tab comes back into focus so newly created
-  // drills (or drafts) appear without a manual pull-to-refresh.
   useFocusEffect(
     useCallback(() => {
       load();
@@ -264,11 +730,54 @@ export default function DrillListScreen() {
     setRefreshing(false);
   }, [load]);
 
+  const byId = useMemo(
+    () => new Map(categories.map((c) => [c.id, c])),
+    [categories]
+  );
+
+  const skills = useMemo(
+    () => categories.filter((c) => c.type === "skill"),
+    [categories]
+  );
+  const phases = useMemo(
+    () => categories.filter((c) => c.type === "phase"),
+    [categories]
+  );
+
+  const publishedDrills = useMemo(
+    () => drills.filter((d) => d.status === "published"),
+    [drills]
+  );
+  const draftCount = drills.length - publishedDrills.length;
+
+  const countsBySkillId = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const s of skills) map[s.id] = 0;
+    for (const d of publishedDrills) {
+      for (const id of d.categoryIds) {
+        if (id in map) map[id]++;
+      }
+    }
+    return map;
+  }, [publishedDrills, skills]);
+
+  const phaseCounts = useMemo(() => {
+    const map: Record<string, number> = {};
+    for (const p of phases) map[p.name] = 0;
+    for (const d of publishedDrills) {
+      for (const id of d.categoryIds) {
+        const cat = byId.get(id);
+        if (cat?.type === "phase") map[cat.name] = (map[cat.name] ?? 0) + 1;
+      }
+    }
+    return map;
+  }, [publishedDrills, phases, byId]);
+
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const matched = drills.filter((d) => {
-      const categoryMatch =
-        activeCategory === ALL || d.categoryIds.includes(activeCategory);
+      const skillMatch =
+        activeSkill === ALL || d.categoryIds.includes(activeSkill);
       const searchMatch = q.length === 0 || d.name.toLowerCase().includes(q);
       const statusMatch =
         activeStatus === "all" || d.status === activeStatus;
@@ -276,18 +785,94 @@ export default function DrillListScreen() {
         activeBenchmark === "all"
           ? true
           : activeBenchmark === "none"
-          ? d.benchmarkType === null
-          : d.benchmarkType === activeBenchmark;
-      return categoryMatch && searchMatch && statusMatch && benchmarkMatch;
+          ? d.benchmarkTypes.length === 0
+          : d.benchmarkTypes.includes(activeBenchmark);
+      return skillMatch && searchMatch && statusMatch && benchmarkMatch;
     });
     if (sortBy === "recent") {
       return [...matched].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     }
     return [...matched].sort((a, b) => a.name.localeCompare(b.name));
-  }, [drills, activeCategory, activeStatus, activeBenchmark, search, sortBy]);
+  }, [drills, activeSkill, activeStatus, activeBenchmark, search, sortBy]);
+
+  // Group the filtered drills by their primary phase (first phase-type
+  // category linked on each drill). Section order is fixed: Warm Up first,
+  // then Agilities, then every other phase in natural display_order, then
+  // Conditioning at the bottom. Drills with no phase tag fall into an
+  // "Unsorted" group below Conditioning.
+  const sectionedDrills = useMemo(() => {
+    type Section = {
+      key: string;
+      label: string;
+      color: string;
+      drills: Drill[];
+    };
+    const byPhaseId = new Map<string, Drill[]>();
+    const unsorted: Drill[] = [];
+    for (const d of filtered) {
+      const phaseId = d.categoryIds.find(
+        (id) => byId.get(id)?.type === "phase"
+      );
+      if (phaseId) {
+        const list = byPhaseId.get(phaseId) ?? [];
+        list.push(d);
+        byPhaseId.set(phaseId, list);
+      } else {
+        unsorted.push(d);
+      }
+    }
+
+    // Pinned positions: top-of-list (in order) and bottom-of-list (in order).
+    const PINNED_TOP_KEYS: ReadonlyArray<string> = ["warmup", "agilities"];
+    const PINNED_BOTTOM_KEYS: ReadonlyArray<string> = ["conditioning"];
+
+    const phaseByNormalizedKey = (key: string) =>
+      phases.find((p) => normalizeCategory(p.name) === key);
+
+    const topPinned = PINNED_TOP_KEYS.map(phaseByNormalizedKey).filter(
+      (p): p is Category => !!p
+    );
+    const bottomPinned = PINNED_BOTTOM_KEYS.map(phaseByNormalizedKey).filter(
+      (p): p is Category => !!p
+    );
+    const pinnedIds = new Set(
+      [...topPinned, ...bottomPinned].map((p) => p.id)
+    );
+
+    const pushPhase = (sections: Section[], p: Category) => {
+      const list = byPhaseId.get(p.id) ?? [];
+      if (list.length === 0) return;
+      sections.push({ key: p.id, label: p.name, color: p.color, drills: list });
+    };
+
+    const sections: Section[] = [];
+
+    // Top-pinned phases.
+    for (const p of topPinned) pushPhase(sections, p);
+
+    // Middle: remaining phases in natural display_order.
+    for (const p of phases) {
+      if (pinnedIds.has(p.id)) continue;
+      pushPhase(sections, p);
+    }
+
+    // Bottom-pinned phases.
+    for (const p of bottomPinned) pushPhase(sections, p);
+
+    if (unsorted.length > 0) {
+      sections.push({
+        key: "unsorted",
+        label: "Unsorted",
+        color: colors.text.muted,
+        drills: unsorted,
+      });
+    }
+
+    return sections;
+  }, [filtered, phases, byId]);
 
   const activeFilterCount =
-    (activeCategory !== ALL ? 1 : 0) +
+    (activeSkill !== ALL ? 1 : 0) +
     (activeStatus !== "all" ? 1 : 0) +
     (activeBenchmark !== "all" ? 1 : 0);
 
@@ -301,7 +886,11 @@ export default function DrillListScreen() {
     router.push("/drills/new" as never);
   };
 
-  const headerPaddingTop = insets.top + spacing.lg;
+  const headerPaddingTop = insets.top + spacing.md;
+  const formatLabel = (teamFormat ?? "5V5").toUpperCase();
+  const eyebrowLeft = teamName
+    ? teamName.toUpperCase()
+    : "PLAYBOOK";
 
   if (loading) {
     return (
@@ -309,68 +898,28 @@ export default function DrillListScreen() {
         style={{
           flex: 1,
           backgroundColor: colors.surface.base,
-          paddingHorizontal: spacing.xl,
+          paddingHorizontal: spacing.lg,
           paddingTop: headerPaddingTop,
         }}
       >
+        <Eyebrow variant="brand">{eyebrowLeft} · {formatLabel}</Eyebrow>
         <Text
-          style={{
-            fontSize: 20,
-            lineHeight: 28,
-            fontWeight: "500",
-            color: colors.text.primary,
-          }}
+          style={[
+            fontStyle("bold"),
+            {
+              fontSize: 22,
+              letterSpacing: tracking.tight,
+              color: colors.text.primary,
+              marginTop: 2,
+            },
+          ]}
         >
           Drills
         </Text>
         <View style={{ marginTop: spacing["2xl"], gap: spacing.sm }}>
-          {[0, 1, 2, 3].map((i) => (
-            <SkeletonCard key={i} />
+          {[0, 1, 2, 3, 4].map((i) => (
+            <SkeletonRow key={i} />
           ))}
-        </View>
-      </View>
-    );
-  }
-
-  if (drills.length === 0) {
-    return (
-      <View
-        style={{
-          flex: 1,
-          backgroundColor: colors.surface.base,
-          paddingHorizontal: spacing.xl,
-          paddingTop: headerPaddingTop,
-        }}
-      >
-        <Text
-          style={{
-            fontSize: 20,
-            lineHeight: 28,
-            fontWeight: "500",
-            color: colors.text.primary,
-          }}
-        >
-          Drills
-        </Text>
-        <View
-          style={{
-            flex: 1,
-            alignItems: "center",
-            justifyContent: "center",
-            gap: spacing.lg,
-          }}
-        >
-          <Text
-            style={{
-              fontSize: 15,
-              lineHeight: 22,
-              color: colors.text.secondary,
-              textAlign: "center",
-            }}
-          >
-            No drills yet. Create your first drill to get started.
-          </Text>
-          <Button label="Create Drill" onPress={goToNew} fullWidth={false} />
         </View>
       </View>
     );
@@ -378,107 +927,9 @@ export default function DrillListScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface.base }}>
-      <View
-        style={{
-          paddingTop: headerPaddingTop,
-          paddingHorizontal: spacing.xl,
-          paddingBottom: spacing.md,
-        }}
-      >
-        <Text
-          style={{
-            fontSize: 20,
-            lineHeight: 28,
-            fontWeight: "500",
-            color: colors.text.primary,
-          }}
-        >
-          Drills
-        </Text>
-      </View>
-
-      <View
-        style={{
-          paddingHorizontal: spacing.xl,
-          paddingBottom: spacing.md,
-        }}
-      >
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            backgroundColor: colors.surface.raised,
-            borderRadius: radius.md,
-            borderWidth: 1,
-            borderColor: colors.border.card,
-            paddingHorizontal: spacing.md,
-            minHeight: 44,
-          }}
-        >
-          <Ionicons
-            name="search"
-            size={18}
-            color={colors.text.muted}
-            style={{ marginRight: spacing.sm }}
-          />
-          <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Search drills..."
-            placeholderTextColor={colors.text.muted}
-            style={{
-              flex: 1,
-              fontSize: 15,
-              color: colors.text.primary,
-              paddingVertical: spacing.sm,
-            }}
-            returnKeyType="search"
-            autoCorrect={false}
-          />
-          {search.length > 0 && (
-            <Pressable
-              onPress={() => setSearch("")}
-              hitSlop={8}
-              accessibilityLabel="Clear search"
-            >
-              <Ionicons
-                name="close-circle"
-                size={18}
-                color={colors.text.muted}
-              />
-            </Pressable>
-          )}
-        </View>
-      </View>
-
-      <View
-        style={{
-          flexDirection: "row",
-          paddingHorizontal: spacing.xl,
-          paddingBottom: spacing.md,
-          gap: spacing.sm,
-        }}
-      >
-        <FilterButton
-          label="Filter"
-          badge={activeFilterCount > 0 ? activeFilterCount : undefined}
-          active={activeFilterCount > 0}
-          onPress={() => setFilterOpen(true)}
-        />
-        <FilterButton
-          label={`Sort: ${sortLabel}`}
-          active={sortBy !== "name_asc"}
-          onPress={() => setSortOpen(true)}
-        />
-      </View>
-
-      <FlatList
-        data={filtered}
-        keyExtractor={(item) => item.id}
+      <ScrollView
         contentContainerStyle={{
-          paddingHorizontal: spacing.xl,
-          paddingBottom: spacing["3xl"] + 72,
-          gap: spacing.sm,
+          paddingBottom: 60 + insets.bottom + spacing.xl,
         }}
         refreshControl={
           <RefreshControl
@@ -487,87 +938,297 @@ export default function DrillListScreen() {
             tintColor={colors.orange[500]}
           />
         }
-        renderItem={({ item }) => (
-          <Pressable onPress={() => goToDrill(item.id)}>
-            {({ pressed }) => (
-              <View
-                style={{
-                  backgroundColor: colors.surface.raised,
-                  borderRadius: radius.lg,
-                  borderWidth: 1,
-                  borderColor: colors.border.card,
-                  borderLeftWidth: 3,
-                  borderLeftColor: colors.orange[500],
-                  padding: spacing.lg,
-                  minHeight: 64,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: spacing.md,
-                  shadowColor: "#000",
-                  shadowOpacity: 0.15,
-                  shadowOffset: { width: 0, height: 2 },
-                  shadowRadius: 4,
-                  elevation: 2,
-                  opacity: pressed ? 0.88 : 1,
-                  transform: [{ scale: pressed ? 0.99 : 1 }],
-                }}
-              >
-                <View style={{ flex: 1, minWidth: 0 }}>
+      >
+        {/* Top header */}
+        <View
+          style={{
+            paddingTop: headerPaddingTop,
+            paddingHorizontal: spacing.lg,
+            paddingBottom: 2,
+            flexDirection: "row",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+          }}
+        >
+          <View style={{ gap: 2, flexShrink: 1 }}>
+            <Eyebrow variant="brand">{eyebrowLeft} · {formatLabel}</Eyebrow>
+            <Text
+              style={[
+                fontStyle("bold"),
+                {
+                  fontSize: 22,
+                  letterSpacing: tracking.tight,
+                  color: colors.text.primary,
+                },
+              ]}
+            >
+              Drills
+            </Text>
+          </View>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            <HeaderIconButton
+              icon="search"
+              variant="solid"
+              onPress={() => {
+                setSearchOpen((v) => !v);
+                if (searchOpen) setSearch("");
+              }}
+              accessibilityLabel="Search drills"
+            />
+            <HeaderIconButton
+              icon="add"
+              variant="primary"
+              onPress={goToNew}
+              accessibilityLabel="Create drill"
+            />
+          </View>
+        </View>
+
+        {/* Search row (toggle) */}
+        {searchOpen && (
+          <View
+            style={{
+              paddingHorizontal: spacing.lg,
+              paddingTop: spacing.md,
+            }}
+          >
+            <View
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                backgroundColor: colors.surface.raised,
+                borderRadius: radius.md,
+                borderWidth: 1,
+                borderColor: colors.border.card,
+                paddingHorizontal: spacing.md,
+                minHeight: 40,
+              }}
+            >
+              <Ionicons
+                name="search"
+                size={16}
+                color={colors.text.muted}
+                style={{ marginRight: spacing.sm }}
+              />
+              <TextInput
+                value={search}
+                onChangeText={setSearch}
+                placeholder="Search drills..."
+                placeholderTextColor={colors.text.muted}
+                style={[
+                  fontStyle("medium"),
+                  {
+                    flex: 1,
+                    fontSize: 14,
+                    color: colors.text.primary,
+                    paddingVertical: spacing.sm,
+                  },
+                ]}
+                autoFocus
+                returnKeyType="search"
+                autoCorrect={false}
+              />
+              {search.length > 0 && (
+                <Pressable
+                  onPress={() => setSearch("")}
+                  hitSlop={8}
+                  accessibilityLabel="Clear search"
+                >
+                  <Ionicons
+                    name="close-circle"
+                    size={16}
+                    color={colors.text.muted}
+                  />
+                </Pressable>
+              )}
+            </View>
+          </View>
+        )}
+
+        {/* Scoreboard hero — canonical UFF accent card */}
+        <View style={{ paddingHorizontal: spacing.lg, paddingTop: spacing.md }}>
+          <Card variant="accent" accentColor="orange" pad={14}>
+            {/* Yard-line backdrop */}
+            <View
+              style={{
+                position: "absolute",
+                top: 8,
+                left: 16,
+                right: 16,
+                flexDirection: "row",
+                justifyContent: "space-between",
+              }}
+              pointerEvents="none"
+            >
+              {["10", "20", "30", "40", "50"].map((n) => (
+                <Text
+                  key={n}
+                  style={[
+                    monoStyle("bold"),
+                    {
+                      fontSize: 8,
+                      color: colors.text.faint,
+                      letterSpacing: 0.8,
+                    },
+                  ]}
+                >
+                  {n}
+                </Text>
+              ))}
+            </View>
+
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "flex-end",
+                marginTop: 8,
+              }}
+            >
+              <View style={{ gap: 4 }}>
+                <Text
+                  style={[
+                    fontStyle("bold"),
+                    {
+                      fontSize: 9.5,
+                      letterSpacing: 1.4,
+                      color: colors.text.secondary,
+                      textTransform: "uppercase",
+                    },
+                  ]}
+                >
+                  Drills
+                </Text>
+                <View
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "baseline",
+                    gap: 4,
+                  }}
+                >
+                  <Text
+                    style={[
+                      monoStyle("bold"),
+                      {
+                        fontSize: 38,
+                        color: colors.text.primary,
+                        letterSpacing: -0.76,
+                        lineHeight: 40,
+                      },
+                    ]}
+                  >
+                    {publishedDrills.length}
+                  </Text>
+                  <Text
+                    style={[
+                      monoStyle("medium"),
+                      {
+                        fontSize: 14,
+                        color: colors.text.secondary,
+                        letterSpacing: -0.28,
+                      },
+                    ]}
+                  >
+                    published
+                  </Text>
+                </View>
+                {draftCount > 0 && (
                   <View
                     style={{
-                      flexDirection: "row",
-                      alignItems: "flex-start",
-                      justifyContent: "space-between",
-                      gap: spacing.md,
+                      paddingHorizontal: 7,
+                      paddingVertical: 2,
+                      borderRadius: 4,
+                      borderWidth: 1,
+                      borderColor: colors.border.dashed,
+                      borderStyle: "dashed",
+                      alignSelf: "flex-start",
                     }}
                   >
                     <Text
-                      style={{
-                        fontSize: 15,
-                        lineHeight: 22,
-                        fontWeight: "500",
-                        color: colors.text.primary,
-                        flex: 1,
-                      }}
-                      numberOfLines={2}
+                      style={[
+                        fontStyle("bold"),
+                        {
+                          fontSize: 10,
+                          letterSpacing: 0.8,
+                          color: colors.text.secondary,
+                          textTransform: "uppercase",
+                        },
+                      ]}
                     >
-                      {item.name}
+                      {draftCount} drafts
                     </Text>
-                    {item.status === "draft" && <DraftBadge />}
                   </View>
-                  {(item.categoryNames.length > 0 || item.benchmarkType) && (
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        flexWrap: "wrap",
-                        alignItems: "center",
-                        gap: spacing.xs,
-                        marginTop: spacing.sm,
-                      }}
-                    >
-                      {item.categoryNames.map((name) => (
-                        <CategoryTag key={name} name={name} />
-                      ))}
-                      {item.benchmarkType && (
-                        <BenchmarkBadge type={item.benchmarkType} />
-                      )}
-                    </View>
-                  )}
-                </View>
-                <Ionicons
-                  name="chevron-forward"
-                  size={18}
-                  color={colors.text.secondary}
-                />
+                )}
               </View>
-            )}
-          </Pressable>
-        )}
-        ListEmptyComponent={
+
+              <View
+                style={{
+                  flex: 1,
+                  flexDirection: "row",
+                  justifyContent: "flex-end",
+                  alignItems: "flex-end",
+                  flexWrap: "wrap",
+                  gap: 14,
+                  paddingLeft: spacing.md,
+                }}
+              >
+                {phases
+                  .filter((p) => (phaseCounts[p.name] ?? 0) > 0)
+                  .map((p) => (
+                    <SquadBar
+                      key={p.id}
+                      label={p.name.slice(0, 3).toUpperCase()}
+                      count={phaseCounts[p.name] ?? 0}
+                      color={p.color}
+                    />
+                  ))}
+                {skills
+                  .filter((s) => (countsBySkillId[s.id] ?? 0) > 0)
+                  .map((s) => (
+                    <SquadBar
+                      key={s.id}
+                      label={s.name.slice(0, 3).toUpperCase()}
+                      count={countsBySkillId[s.id] ?? 0}
+                      color={s.color}
+                    />
+                  ))}
+              </View>
+            </View>
+          </Card>
+        </View>
+
+
+        {/* Filter / sort bar */}
+        <View
+          style={{
+            flexDirection: "row",
+            paddingHorizontal: spacing.lg,
+            paddingTop: spacing.md,
+            paddingBottom: spacing.md,
+            gap: spacing.sm,
+          }}
+        >
+          <FilterButton
+            label="Filter"
+            badge={activeFilterCount > 0 ? activeFilterCount : undefined}
+            active={activeFilterCount > 0}
+            onPress={() => setFilterOpen(true)}
+          />
+          <FilterButton
+            label={`Sort: ${sortLabel}`}
+            active={sortBy !== "name_asc"}
+            onPress={() => setSortOpen(true)}
+          />
+        </View>
+
+        {/* Tables — one per phase, plus an "Unsorted" group at the bottom for
+            drills with no phase tag. Empty phases stay hidden. */}
+        {sectionedDrills.length === 0 ? (
           <View
             style={{
+              marginHorizontal: spacing.lg,
               padding: spacing["2xl"],
-              borderRadius: radius.lg,
+              borderRadius: radius.card,
               borderWidth: 1,
               borderColor: colors.border.default,
               borderStyle: "dashed",
@@ -575,65 +1236,112 @@ export default function DrillListScreen() {
             }}
           >
             <Text
-              style={{
-                fontSize: 15,
-                lineHeight: 22,
-                color: colors.text.secondary,
-                textAlign: "center",
-              }}
+              style={[
+                fontStyle("medium"),
+                {
+                  fontSize: 14,
+                  color: colors.text.secondary,
+                  textAlign: "center",
+                },
+              ]}
             >
-              No drills match your filters.
+              {drills.length === 0
+                ? "No drills yet. Create your first drill to get started."
+                : "No drills match your filters."}
             </Text>
           </View>
-        }
-      />
-
-      <Pressable
-        onPress={goToNew}
-        accessibilityLabel="Create drill"
-        style={{
-          position: "absolute",
-          right: spacing.xl,
-          bottom: 60 + insets.bottom + spacing.lg,
-          width: 56,
-          height: 56,
-        }}
-      >
-        {({ pressed }) => (
-          <View
-            style={{
-              width: 56,
-              height: 56,
-              borderRadius: 28,
-              backgroundColor: colors.orange[500],
-              alignItems: "center",
-              justifyContent: "center",
-              shadowColor: "#000",
-              shadowOffset: { width: 0, height: 4 },
-              shadowOpacity: 0.35,
-              shadowRadius: 10,
-              elevation: 8,
-              opacity: pressed ? 0.88 : 1,
-              transform: [{ scale: pressed ? 0.96 : 1 }],
-            }}
-          >
-            <Ionicons name="add" size={28} color="#FFFFFF" />
-          </View>
+        ) : (
+          sectionedDrills.map((section) => (
+            <View key={section.key} style={{ marginBottom: spacing.lg }}>
+              <PhaseSectionHeader
+                label={section.label}
+                color={section.color}
+                count={section.drills.length}
+              />
+              <View style={{ marginHorizontal: spacing.lg }}>
+                <Card variant="filled" pad={0} style={{ overflow: "hidden" }}>
+                  <TableHeader />
+                  {section.drills.map((d) => (
+                    <DrillRow
+                      key={d.id}
+                      drill={d}
+                      byId={byId}
+                      onPress={() => goToDrill(d.id)}
+                    />
+                  ))}
+                </Card>
+              </View>
+            </View>
+          ))
         )}
-      </Pressable>
+
+        {/* Add row (footer) */}
+        <View
+          style={{
+            paddingHorizontal: spacing.lg,
+            paddingTop: spacing.md,
+          }}
+        >
+          <Pressable onPress={goToNew}>
+            {({ pressed }) => (
+              <View
+                style={{
+                  padding: 12,
+                  paddingHorizontal: 14,
+                  borderWidth: 1,
+                  borderColor: colors.orange.tintBorder,
+                  borderStyle: "dashed",
+                  borderRadius: radius.card,
+                  backgroundColor: colors.orange.tint,
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 10,
+                  opacity: pressed ? 0.85 : 1,
+                }}
+              >
+                <Ionicons name="add" size={14} color={colors.orange[500]} />
+                <Text
+                  style={[
+                    fontStyle("semibold"),
+                    {
+                      fontSize: 13,
+                      color: colors.orange[500],
+                    },
+                  ]}
+                >
+                  Add a drill
+                </Text>
+                <View style={{ flex: 1 }} />
+                <Text
+                  style={[
+                    monoStyle("medium"),
+                    {
+                      fontSize: 10,
+                      color: colors.text.muted,
+                      letterSpacing: 0.6,
+                    },
+                  ]}
+                >
+                  {drills.length} TOTAL
+                </Text>
+              </View>
+            )}
+          </Pressable>
+        </View>
+      </ScrollView>
 
       <FilterSheet
         open={filterOpen}
         onClose={() => setFilterOpen(false)}
-        categories={categories}
-        activeCategory={activeCategory}
-        setActiveCategory={setActiveCategory}
+        skills={skills}
+        activeSkill={activeSkill}
+        setActiveSkill={setActiveSkill}
         activeStatus={activeStatus}
         setActiveStatus={setActiveStatus}
         activeBenchmark={activeBenchmark}
         setActiveBenchmark={setActiveBenchmark}
         onClear={() => {
-          setActiveCategory(ALL);
+          setActiveSkill(ALL);
           setActiveStatus("all");
           setActiveBenchmark("all");
         }}
@@ -672,33 +1380,34 @@ function FilterButton({
             flexDirection: "row",
             alignItems: "center",
             gap: spacing.xs,
-            minHeight: 36,
-            paddingHorizontal: 14,
-            paddingVertical: 8,
+            minHeight: 32,
+            paddingHorizontal: 12,
+            paddingVertical: 6,
             borderRadius: radius.pill,
             borderWidth: active ? 1.5 : 1,
             backgroundColor: active
-              ? "rgba(212,138,48,0.22)"
-              : colors.surface.elevated,
+              ? colors.orange.tint
+              : colors.surface.raised,
             borderColor: active ? colors.orange[500] : colors.border.card,
             opacity: pressed ? 0.88 : 1,
             transform: [{ scale: pressed ? 0.97 : 1 }],
           }}
         >
           <Text
-            style={{
-              fontSize: 13,
-              lineHeight: 18,
-              fontWeight: "500",
-              color: active ? colors.orange[400] : colors.text.primary,
-            }}
+            style={[
+              fontStyle("medium"),
+              {
+                fontSize: 12,
+                color: active ? colors.orange[400] : colors.text.primary,
+              },
+            ]}
           >
             {label}
             {badge !== undefined ? ` (${badge})` : ""}
           </Text>
           <Ionicons
             name="chevron-down"
-            size={14}
+            size={12}
             color={active ? colors.orange[400] : colors.text.secondary}
           />
         </View>
@@ -728,7 +1437,7 @@ function SheetContainer({
         onPress={onClose}
         style={{
           flex: 1,
-          backgroundColor: "rgba(0,0,0,0.5)",
+          backgroundColor: colors.scrim,
           justifyContent: "flex-end",
         }}
       >
@@ -765,13 +1474,15 @@ function SheetContainer({
 function SheetSectionLabel({ children }: { children: string }) {
   return (
     <Text
-      style={{
-        fontSize: 11,
-        fontWeight: "500",
-        letterSpacing: 0.8,
-        textTransform: "uppercase",
-        color: colors.text.label,
-      }}
+      style={[
+        fontStyle("bold"),
+        {
+          fontSize: 11,
+          letterSpacing: 1.4,
+          textTransform: "uppercase",
+          color: colors.text.label,
+        },
+      ]}
     >
       {children}
     </Text>
@@ -781,9 +1492,9 @@ function SheetSectionLabel({ children }: { children: string }) {
 function FilterSheet({
   open,
   onClose,
-  categories,
-  activeCategory,
-  setActiveCategory,
+  skills,
+  activeSkill,
+  setActiveSkill,
   activeStatus,
   setActiveStatus,
   activeBenchmark,
@@ -792,9 +1503,9 @@ function FilterSheet({
 }: {
   open: boolean;
   onClose: () => void;
-  categories: Category[];
-  activeCategory: string;
-  setActiveCategory: (v: string) => void;
+  skills: Category[];
+  activeSkill: string;
+  setActiveSkill: (v: string) => void;
   activeStatus: StatusFilter;
   setActiveStatus: (v: StatusFilter) => void;
   activeBenchmark: BenchmarkFilter;
@@ -811,21 +1522,19 @@ function FilterSheet({
         }}
       >
         <Text
-          style={{
-            fontSize: 18,
-            fontWeight: "500",
-            color: colors.text.primary,
-          }}
+          style={[
+            fontStyle("bold"),
+            { fontSize: 18, color: colors.text.primary },
+          ]}
         >
           Filter
         </Text>
         <Pressable onPress={onClear} hitSlop={8}>
           <Text
-            style={{
-              fontSize: 13,
-              fontWeight: "500",
-              color: colors.orange[400],
-            }}
+            style={[
+              fontStyle("medium"),
+              { fontSize: 13, color: colors.orange[400] },
+            ]}
           >
             Clear
           </Text>
@@ -833,21 +1542,22 @@ function FilterSheet({
       </View>
 
       <View style={{ gap: spacing.sm }}>
-        <SheetSectionLabel>Category</SheetSectionLabel>
+        <SheetSectionLabel>Skill</SheetSectionLabel>
         <View
           style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}
         >
-          <Tag
+          <PhaseChip
             label="All"
-            selected={activeCategory === ALL}
-            onPress={() => setActiveCategory(ALL)}
+            selected={activeSkill === ALL}
+            onPress={() => setActiveSkill(ALL)}
           />
-          {categories.map((c) => (
-            <Tag
+          {skills.map((c) => (
+            <PhaseChip
               key={c.id}
               label={c.name}
-              selected={activeCategory === c.id}
-              onPress={() => setActiveCategory(c.id)}
+              color={c.color}
+              selected={activeSkill === c.id}
+              onPress={() => setActiveSkill(c.id)}
             />
           ))}
         </View>
@@ -858,18 +1568,20 @@ function FilterSheet({
         <View
           style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}
         >
-          <Tag
+          <PhaseChip
             label="All"
             selected={activeStatus === "all"}
             onPress={() => setActiveStatus("all")}
           />
-          <Tag
+          <PhaseChip
             label="Published"
+            color={colors.green[400]}
             selected={activeStatus === "published"}
             onPress={() => setActiveStatus("published")}
           />
-          <Tag
+          <PhaseChip
             label="Draft"
+            color={colors.text.subtle}
             selected={activeStatus === "draft"}
             onPress={() => setActiveStatus("draft")}
           />
@@ -881,22 +1593,36 @@ function FilterSheet({
         <View
           style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}
         >
-          <Tag
+          <PhaseChip
             label="All"
             selected={activeBenchmark === "all"}
             onPress={() => setActiveBenchmark("all")}
           />
-          <Tag
+          <PhaseChip
             label="Timed"
+            color={colors.orange[500]}
             selected={activeBenchmark === "timed"}
             onPress={() => setActiveBenchmark("timed")}
           />
-          <Tag
+          <PhaseChip
             label="Rated"
+            color={colors.blue[400]}
             selected={activeBenchmark === "rated"}
             onPress={() => setActiveBenchmark("rated")}
           />
-          <Tag
+          <PhaseChip
+            label="Reps Complete"
+            color={colors.lime[400]}
+            selected={activeBenchmark === "reps_complete"}
+            onPress={() => setActiveBenchmark("reps_complete")}
+          />
+          <PhaseChip
+            label="Percentage"
+            color={colors.amber[400]}
+            selected={activeBenchmark === "percentage"}
+            onPress={() => setActiveBenchmark("percentage")}
+          />
+          <PhaseChip
             label="None"
             selected={activeBenchmark === "none"}
             onPress={() => setActiveBenchmark("none")}
@@ -927,11 +1653,10 @@ function SortSheet({
   return (
     <SheetContainer open={open} onClose={onClose}>
       <Text
-        style={{
-          fontSize: 18,
-          fontWeight: "500",
-          color: colors.text.primary,
-        }}
+        style={[
+          fontStyle("bold"),
+          { fontSize: 18, color: colors.text.primary },
+        ]}
       >
         Sort
       </Text>
@@ -958,11 +1683,13 @@ function SortSheet({
               })}
             >
               <Text
-                style={{
-                  fontSize: 15,
-                  fontWeight: "500",
-                  color: selected ? colors.orange[400] : colors.text.primary,
-                }}
+                style={[
+                  fontStyle("medium"),
+                  {
+                    fontSize: 15,
+                    color: selected ? colors.orange[400] : colors.text.primary,
+                  },
+                ]}
               >
                 {o.label}
               </Text>

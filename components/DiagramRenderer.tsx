@@ -1,13 +1,16 @@
 import { View, Text } from "react-native";
 import Svg, {
   Circle,
+  Defs,
   Ellipse,
   G,
   Line,
+  LinearGradient,
   Path as SvgPath,
   Polygon,
   Polyline,
   Rect,
+  Stop,
   Text as SvgText,
 } from "react-native-svg";
 import type {
@@ -58,14 +61,17 @@ const VIEW_H = FIELD_H + PAD_Y * 2;
 const VIEWBOX = `${-PAD_LEFT} ${-PAD_Y} ${VIEW_W} ${VIEW_H}`;
 const CONE_R = 4;
 
-const FIELD_BG = "#FFFFFF";
-const LINE_10 = "#C8C8C8";
-const LINE_5 = "#DCDCDC";
-const LINE_1 = "#EEEEEE";
-const HASH_COLOR = "#E8E8E8";
-const NUMBER_COLOR = "rgba(0,0,0,0.45)";
-const SIDELINE = "#D0D0D0";
-const PATH_LABEL_COLOR = "#555555";
+// Black-turf field — mirrors the UFF Mobile design (variant-a-newdrill).
+const FIELD_BG = "#0A0E0B";
+const FIELD_BG_TOP = "#0E1410";
+const LINE_10 = "rgba(244,244,242,0.22)";
+const LINE_5 = "rgba(244,244,242,0.12)";
+const LINE_1 = "rgba(244,244,242,0.05)";
+const HASH_COLOR = "rgba(244,244,242,0.08)";
+const NUMBER_COLOR = "rgba(244,244,242,0.55)";
+const SIDELINE = "rgba(244,244,242,0.18)";
+const PATH_LABEL_COLOR = "rgba(244,244,242,0.7)";
+const WATERMARK_COLOR = "rgba(244,244,242,0.25)";
 
 function zigzagPoints(from: RouteWaypoint, to: RouteWaypoint) {
   const mx = (from.x + to.x) / 2;
@@ -227,7 +233,13 @@ function FootballField() {
 
   return (
     <G>
-      <Rect x={0} y={0} width={FIELD_W} height={FIELD_H} fill={FIELD_BG} />
+      <Defs>
+        <LinearGradient id="turf-ro" x1="0" y1="0" x2="0" y2="1">
+          <Stop offset="0" stopColor={FIELD_BG_TOP} />
+          <Stop offset="1" stopColor={FIELD_BG} />
+        </LinearGradient>
+      </Defs>
+      <Rect x={0} y={0} width={FIELD_W} height={FIELD_H} fill="url(#turf-ro)" />
       {lines}
       {hashes}
       <Line x1={0} y1={0} x2={0} y2={FIELD_H} stroke={SIDELINE} strokeWidth={1} />
@@ -240,6 +252,17 @@ function FootballField() {
         strokeWidth={1}
       />
       {numbers}
+      <SvgText
+        x={FIELD_W - 2}
+        y={8}
+        fontSize={5}
+        fill={WATERMARK_COLOR}
+        textAnchor="end"
+        letterSpacing={0.6}
+        fontWeight="700"
+      >
+        WIDTH 20 YDS
+      </SvgText>
     </G>
   );
 }
@@ -265,7 +288,7 @@ export default function DiagramRenderer({ data }: DiagramRendererProps) {
           overflow: "hidden",
           borderWidth: 1,
           borderColor: colors.border.default,
-          backgroundColor: colors.surface.base,
+          backgroundColor: FIELD_BG,
         }}
       >
         <Svg
@@ -441,19 +464,34 @@ export default function DiagramRenderer({ data }: DiagramRendererProps) {
                 </G>
               );
             }
-            const color = isQB ? "#EAB308" : "#D48A30";
+            const defaultColor = isQB ? "#EAB308" : "#D48A30";
+            const color = cone.color ?? defaultColor;
             const r = isQB ? CONE_R + 1 : CONE_R;
+            const labelText = cone.label?.trim() ?? "";
+            // Triangle pointing up — matches the editor (and the cone glyph
+            // in the toolbar). QBs stay circular.
+            const trianglePoints = `${cone.x},${cone.y - r} ${cone.x - r * 0.85},${cone.y + r * 0.85} ${cone.x + r * 0.85},${cone.y + r * 0.85}`;
             return (
               <G key={cone.id}>
-                <Circle
-                  cx={cone.x}
-                  cy={cone.y}
-                  r={r}
-                  fill={color}
-                  stroke={color}
-                  strokeWidth={1.5}
-                />
-                {isQB && (
+                {isQB ? (
+                  <Circle
+                    cx={cone.x}
+                    cy={cone.y}
+                    r={r}
+                    fill={color}
+                    stroke={color}
+                    strokeWidth={1.5}
+                  />
+                ) : (
+                  <Polygon
+                    points={trianglePoints}
+                    fill={color}
+                    stroke={color}
+                    strokeWidth={1.2}
+                    strokeLinejoin="round"
+                  />
+                )}
+                {isQB ? (
                   <SvgText
                     x={cone.x}
                     y={cone.y}
@@ -463,9 +501,20 @@ export default function DiagramRenderer({ data }: DiagramRendererProps) {
                     textAnchor="middle"
                     dy={1.8}
                   >
-                    QB
+                    {labelText.slice(0, 4) || "QB"}
                   </SvgText>
-                )}
+                ) : labelText.length > 0 ? (
+                  <SvgText
+                    x={cone.x}
+                    y={cone.y + r + 3.5}
+                    fontSize={4}
+                    fontWeight="500"
+                    fill="#1F1A05"
+                    textAnchor="middle"
+                  >
+                    {labelText.slice(0, 4)}
+                  </SvgText>
+                ) : null}
               </G>
             );
           })}

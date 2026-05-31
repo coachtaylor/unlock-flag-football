@@ -1,0 +1,1329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>UFF Mobile · Design System</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    /* Surfaces */
+    --surface-base: #08090B;
+    --surface-raised: #141417;
+    --surface-overlay: #1B1B20;
+    --surface-elevated: #2D3850;
+    --surface-input: #1B1B20;
+    --surface-muted: rgba(255, 255, 255, 0.04);
+    --surface-pressed: rgba(255, 255, 255, 0.08);
+
+    /* Text */
+    --text-primary: #F4F4F2;
+    --text-label: rgba(244, 244, 242, 0.82);
+    --text-secondary: #8A8A92;
+    --text-muted: #5A5A62;
+    --text-subtle: rgba(244, 244, 242, 0.55);
+
+    /* Borders */
+    --border-subtle: rgba(255, 255, 255, 0.04);
+    --border-default: rgba(255, 255, 255, 0.08);
+    --border-card: #1F1F25;
+    --border-strong: #26262C;
+
+    /* Brand: End Zone Orange */
+    --orange-400: #FF8A4A;
+    --orange-500: #FF6A1A;
+    --orange-600: #B84200;
+    --orange-tint: rgba(255, 106, 26, 0.14);
+    --orange-tint-border: rgba(255, 106, 26, 0.30);
+    --orange-glow: rgba(255, 106, 26, 0.35);
+
+    /* Supporting */
+    --lime-400: #C2FF3D;
+    --lime-tint: rgba(194, 255, 61, 0.12);
+    --green-400: #4ADE80;
+    --green-600: #16A34A;
+    --green-800: #14532D;
+    --green-tint: rgba(74, 222, 128, 0.12);
+    --blue-400: #6EA8FF;
+    --blue-600: #2563EB;
+    --blue-800: #1E3A5F;
+    --indigo-400: #818CF8;
+    --indigo-800: #312E81;
+    --red-semantic: #FF4D4D;
+    --error: #EF4444;
+    --error-light: #FCA5A5;
+
+    /* Type */
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--surface-base);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-weight: 400;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background:
+      radial-gradient(ellipse 80% 50% at 50% -10%, rgba(255, 106, 26, 0.08), transparent 60%),
+      var(--surface-base);
+    min-height: 100vh;
+  }
+
+  .page {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 64px 32px 120px;
+  }
+
+  /* ───────── Header / hero ───────── */
+  .hero {
+    margin-bottom: 72px;
+    padding-bottom: 48px;
+    border-bottom: 1px solid var(--border-default);
+  }
+
+  .brand-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 32px;
+  }
+  .brand-mark {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    background: var(--orange-500);
+    display: grid;
+    place-items: center;
+    font-family: var(--font-mono);
+    font-weight: 700;
+    color: #2C1810;
+    font-size: 17px;
+    letter-spacing: -0.5px;
+  }
+  .brand-name {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    color: var(--text-secondary);
+  }
+
+  .hero h1 {
+    font-size: 56px;
+    line-height: 1.05;
+    font-weight: 600;
+    letter-spacing: -1.5px;
+    margin-bottom: 20px;
+    max-width: 14ch;
+  }
+  .hero h1 .accent { color: var(--orange-500); }
+  .hero p.lede {
+    font-size: 18px;
+    line-height: 1.5;
+    color: var(--text-secondary);
+    max-width: 60ch;
+  }
+
+  .hero-meta {
+    display: flex;
+    gap: 40px;
+    margin-top: 36px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  .hero-meta div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .hero-meta .k {
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    font-size: 10px;
+  }
+  .hero-meta .v { color: var(--text-primary); }
+
+  /* ───────── Eyebrow ───────── */
+  .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-primary);
+    margin-bottom: 18px;
+  }
+  .eyebrow .tick {
+    width: 3px; height: 14px;
+    border-radius: 2px;
+    background: var(--orange-500);
+  }
+  .eyebrow.dim { color: var(--text-secondary); }
+  .eyebrow.brand { color: var(--orange-500); }
+
+  /* ───────── Sections ───────── */
+  section.s {
+    padding: 56px 0;
+    border-top: 1px solid var(--border-default);
+  }
+  section.s:first-of-type { border-top: none; padding-top: 16px; }
+
+  section.s > header {
+    margin-bottom: 36px;
+  }
+  section.s h2 {
+    font-size: 32px;
+    line-height: 1.15;
+    font-weight: 600;
+    letter-spacing: -0.6px;
+    margin-bottom: 8px;
+  }
+  section.s h2 .num {
+    font-family: var(--font-mono);
+    font-weight: 500;
+    color: var(--text-muted);
+    font-size: 16px;
+    margin-right: 14px;
+    letter-spacing: 0;
+    display: inline-block;
+    transform: translateY(-4px);
+  }
+  section.s p.sec-desc {
+    color: var(--text-secondary);
+    font-size: 15px;
+    max-width: 64ch;
+  }
+
+  .sub-h {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin: 36px 0 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .sub-h:first-child { margin-top: 0; }
+  .sub-h::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border-default);
+  }
+
+  /* ───────── Color swatches ───────── */
+  .swatch-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .swatch {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-card);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .swatch .chip {
+    height: 92px;
+    border-bottom: 1px solid var(--border-subtle);
+    position: relative;
+  }
+  .swatch.checker .chip {
+    background-image:
+      linear-gradient(45deg, #2a2a30 25%, transparent 25%),
+      linear-gradient(-45deg, #2a2a30 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, #2a2a30 75%),
+      linear-gradient(-45deg, transparent 75%, #2a2a30 75%);
+    background-size: 12px 12px;
+    background-position: 0 0, 0 6px, 6px -6px, -6px 0;
+  }
+  .swatch .chip-fill {
+    position: absolute; inset: 0;
+  }
+  .swatch .meta {
+    padding: 12px 14px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .swatch .name {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+  .swatch .hex {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    letter-spacing: 0.2px;
+  }
+  .swatch .token {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    letter-spacing: 0.2px;
+  }
+
+  /* Text swatches show contrast */
+  .text-swatch {
+    background: var(--surface-base);
+    border: 1px solid var(--border-card);
+    border-radius: 14px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .text-swatch .sample {
+    font-size: 22px;
+    font-weight: 500;
+    letter-spacing: -0.3px;
+  }
+  .text-swatch .name {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+  .text-swatch .hex {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  /* ───────── Type scale ───────── */
+  .type-row {
+    display: grid;
+    grid-template-columns: 110px 80px 1fr;
+    gap: 24px;
+    align-items: baseline;
+    padding: 18px 0;
+    border-bottom: 1px solid var(--border-default);
+  }
+  .type-row:last-child { border-bottom: none; }
+  .type-row .label {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+  .type-row .spec {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .type-row .sample {
+    color: var(--text-primary);
+  }
+  .t-display { font-size: 38px; line-height: 42px; font-weight: 600; letter-spacing: -0.8px; }
+  .t-stat { font-size: 28px; line-height: 34px; font-weight: 500; }
+  .t-title { font-size: 20px; line-height: 28px; font-weight: 500; }
+  .t-heading { font-size: 17px; line-height: 24px; font-weight: 500; }
+  .t-body { font-size: 15px; line-height: 22px; font-weight: 400; }
+  .t-caption { font-size: 13px; line-height: 18px; font-weight: 400; color: var(--text-secondary); }
+  .t-micro { font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.5px; text-transform: uppercase; color: var(--text-secondary); }
+  .t-mono { font-family: var(--font-mono); font-feature-settings: 'tnum'; }
+
+  .font-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+  .font-card {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-card);
+    border-radius: 14px;
+    padding: 24px;
+  }
+  .font-card .name {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 14px;
+  }
+  .font-card .big {
+    font-size: 56px;
+    line-height: 1;
+    letter-spacing: -2px;
+    margin-bottom: 18px;
+  }
+  .font-card.sans .big { font-family: var(--font-sans); font-weight: 500; }
+  .font-card.mono .big { font-family: var(--font-mono); font-weight: 700; }
+  .font-card .weights {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+  .font-card .weights span {
+    font-family: var(--font-mono);
+    font-size: 11px;
+  }
+
+  /* ───────── Spacing / radius ───────── */
+  .scale-row {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 14px 0;
+    border-bottom: 1px solid var(--border-default);
+  }
+  .scale-row:last-child { border-bottom: none; }
+  .scale-row .key {
+    width: 56px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-primary);
+  }
+  .scale-row .val {
+    width: 60px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .scale-row .bar {
+    height: 12px;
+    background: var(--orange-500);
+    border-radius: 2px;
+  }
+  .scale-row .ring {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-strong);
+    width: 56px; height: 56px;
+  }
+  .scale-row .desc {
+    flex: 1;
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
+
+  /* ───────── Components ───────── */
+  .demo {
+    background:
+      linear-gradient(180deg, rgba(255,106,26,0.025), transparent 40%),
+      var(--surface-raised);
+    border: 1px solid var(--border-card);
+    border-top: 2px solid var(--orange-500);
+    border-radius: 18px;
+    padding: 32px;
+    margin-bottom: 24px;
+  }
+  .demo .demo-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 18px;
+  }
+  .demo-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+  .demo-grid.three { grid-template-columns: repeat(3, 1fr); }
+  .demo-row {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  /* Buttons */
+  .btn {
+    min-height: 52px;
+    padding: 12px 20px;
+    border-radius: 14px;
+    border: none;
+    font-family: var(--font-sans);
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    line-height: 22px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    transition: opacity 150ms ease, transform 80ms ease;
+  }
+  .btn:active { transform: scale(0.97); }
+  .btn-primary {
+    background: var(--orange-500);
+    color: #FFFFFF;
+  }
+  .btn-primary:hover { background: #FF7A2E; }
+  .btn-secondary {
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    border: 1px solid var(--border-default);
+  }
+  .btn-secondary:hover { background: var(--surface-overlay); }
+  .btn-destructive {
+    background: transparent;
+    color: var(--error);
+  }
+  .btn-disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* Tag */
+  .tag {
+    min-height: 36px;
+    padding: 8px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--border-card);
+    background: var(--surface-elevated);
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 500;
+    color: var(--text-primary);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.18);
+  }
+  .tag.selected {
+    background: rgba(255, 106, 26, 0.22);
+    border: 1.5px solid var(--orange-500);
+    color: var(--orange-400);
+    box-shadow: none;
+  }
+
+  /* Pill */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.4px;
+  }
+  .pill.default { background: rgba(255,255,255,0.06); color: var(--text-primary); }
+  .pill.orange { background: var(--orange-tint); color: var(--orange-500); }
+  .pill.lime { background: var(--lime-tint); color: var(--lime-400); }
+  .pill.ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border-strong); }
+  .pill.mono { font-family: var(--font-mono); }
+
+  /* Input */
+  .input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .input-label {
+    font-size: 11px;
+    line-height: 14px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-label);
+    font-weight: 500;
+  }
+  .input {
+    min-height: 44px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid var(--border-card);
+    background: var(--surface-input);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 22px;
+    width: 100%;
+  }
+  .input::placeholder { color: var(--text-muted); }
+  .input:focus { outline: none; border-color: var(--orange-500); }
+
+  /* Card variants — signature UFF card with orange top */
+  .card-canonical {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-strong);
+    border-top: 2px solid var(--orange-500);
+    border-radius: 18px;
+    padding: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card-canonical::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(255, 106, 26, 0.05), rgba(255, 106, 26, 0) 28%);
+    pointer-events: none;
+  }
+  .card-canonical > * { position: relative; }
+  .card-surface {
+    background: var(--surface-raised);
+    border-radius: 18px;
+    padding: 20px;
+  }
+  .card-filled {
+    background: var(--surface-overlay);
+    border: 1px solid var(--border-card);
+    border-radius: 18px;
+    padding: 20px;
+  }
+  .card-accent {
+    background: var(--surface-raised);
+    border: 1px solid rgba(255, 106, 26, 0.22);
+    border-radius: 24px;
+    padding: 24px;
+    position: relative;
+    overflow: hidden;
+  }
+  .card-accent::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(225deg, rgba(255, 106, 26, 0.18), rgba(255, 106, 26, 0) 65%);
+    pointer-events: none;
+  }
+  .card-accent > * { position: relative; }
+  .card-accent.green { border-color: rgba(74, 222, 128, 0.22); }
+  .card-accent.green::before {
+    background: linear-gradient(225deg, rgba(74, 222, 128, 0.18), rgba(74, 222, 128, 0) 65%);
+  }
+  .card-accent.blue { border-color: rgba(110, 168, 255, 0.22); }
+  .card-accent.blue::before {
+    background: linear-gradient(225deg, rgba(110, 168, 255, 0.18), rgba(110, 168, 255, 0) 65%);
+  }
+
+  .card-eyebrow {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 10px;
+  }
+  .card-title {
+    font-size: 17px;
+    line-height: 24px;
+    font-weight: 500;
+    margin-bottom: 6px;
+  }
+  .card-meta {
+    font-size: 13px;
+    color: var(--text-secondary);
+  }
+
+  /* Stat */
+  .stat-block {
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .stat-num {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum';
+    font-size: 32px;
+    line-height: 32px;
+    font-weight: 700;
+    letter-spacing: -0.4px;
+    display: inline-flex;
+    align-items: baseline;
+    gap: 4px;
+  }
+  .stat-unit {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    font-weight: 400;
+    color: var(--text-secondary);
+  }
+  .stat-delta {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--lime-400);
+    margin-left: 6px;
+  }
+  .stat-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1.1px;
+  }
+
+  /* Category pills (custom row) */
+  .cat-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .cat-dot {
+    width: 8px; height: 8px; border-radius: 999px;
+  }
+  .cat-offense { background: rgba(255, 106, 26, 0.14); color: var(--orange-500); }
+  .cat-defense { background: rgba(255, 77, 77, 0.14); color: var(--red-semantic); }
+  .cat-footwork { background: rgba(194, 255, 61, 0.14); color: var(--lime-400); }
+  .cat-routes { background: rgba(110, 168, 255, 0.14); color: var(--blue-400); }
+  .cat-neutral { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
+
+  /* ───────── Rules / anti-patterns ───────── */
+  .rules {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .rule {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-card);
+    border-radius: 14px;
+    padding: 18px 20px;
+    display: flex;
+    gap: 14px;
+  }
+  .rule .num {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--orange-500);
+    font-weight: 700;
+    width: 24px;
+    flex-shrink: 0;
+  }
+  .rule .body {
+    font-size: 14px;
+    color: var(--text-primary);
+    line-height: 1.5;
+  }
+  .rule .body strong {
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+  .rule .body em {
+    font-style: normal;
+    color: var(--text-secondary);
+    display: block;
+    margin-top: 4px;
+    font-size: 13px;
+  }
+
+  .donts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .dont {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-card);
+    border-left: 3px solid var(--red-semantic);
+    border-radius: 12px;
+    padding: 14px 18px;
+    font-size: 14px;
+    color: var(--text-primary);
+  }
+  .dont .x {
+    color: var(--red-semantic);
+    font-family: var(--font-mono);
+    font-weight: 700;
+    margin-right: 8px;
+  }
+
+  /* Voice samples */
+  .voice {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+  .voice .col {
+    background: var(--surface-raised);
+    border: 1px solid var(--border-card);
+    border-radius: 14px;
+    padding: 22px 24px;
+  }
+  .voice .col.good { border-top: 2px solid var(--lime-400); }
+  .voice .col.bad { border-top: 2px solid var(--red-semantic); }
+  .voice .col .tag-row {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 14px;
+  }
+  .voice .col.good .tag-row { color: var(--lime-400); }
+  .voice .col.bad .tag-row { color: var(--red-semantic); }
+  .voice .col p {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+  }
+  .voice .col p:last-child { margin-bottom: 0; }
+  .voice .col.bad p { color: var(--text-secondary); }
+
+  /* Motion table */
+  .motion-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .motion-table th, .motion-table td {
+    text-align: left;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border-default);
+    font-size: 13px;
+  }
+  .motion-table th {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    padding-top: 0;
+  }
+  .motion-table td:first-child {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+  .motion-table td:nth-child(2),
+  .motion-table td:nth-child(3) {
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+  }
+  .motion-table tr:last-child td { border-bottom: none; }
+
+  /* TOC */
+  .toc {
+    position: sticky;
+    top: 32px;
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 200px 1fr;
+    gap: 56px;
+    align-items: start;
+  }
+  .toc h4 {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--text-secondary);
+    margin-bottom: 14px;
+  }
+  .toc ol {
+    list-style: none;
+    counter-reset: toc;
+  }
+  .toc li {
+    counter-increment: toc;
+    margin-bottom: 8px;
+  }
+  .toc a {
+    display: flex;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    text-decoration: none;
+    line-height: 1.4;
+    padding: 4px 0;
+  }
+  .toc a:hover { color: var(--text-primary); }
+  .toc a::before {
+    content: counter(toc, decimal-leading-zero);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    padding-top: 2px;
+  }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .toc { position: static; margin-bottom: 32px; }
+    .demo-grid, .demo-grid.three { grid-template-columns: 1fr; }
+    .rules, .donts, .voice, .font-cards { grid-template-columns: 1fr; }
+    .hero h1 { font-size: 40px; }
+  }
+
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ─────────── HERO ─────────── -->
+  <header class="hero">
+    <div class="brand-row">
+      <div class="brand-mark">U</div>
+      <div class="brand-name">Unlock Flag Football · Mobile</div>
+    </div>
+    <h1>Train smarter. <span class="accent">Look the part.</span></h1>
+    <p class="lede">The visual contract for everything UFF Mobile ships. Dark by default, end-zone orange with a job, two typefaces that pull their weight. Paste any section into Stitch, Figma, or another AI tool before describing the screen you want.</p>
+    <div class="hero-meta">
+      <div><span class="k">Version</span><span class="v">2.0 · May 2026</span></div>
+      <div><span class="k">Owner</span><span class="v">Taylor</span></div>
+      <div><span class="k">Source of truth</span><span class="v">constants/design.ts</span></div>
+      <div><span class="k">Mode</span><span class="v">Dark only</span></div>
+    </div>
+  </header>
+
+  <div class="layout">
+
+    <!-- ─────────── TOC ─────────── -->
+    <nav class="toc">
+      <h4>Contents</h4>
+      <ol>
+        <li><a href="#brand">Brand</a></li>
+        <li><a href="#color">Color</a></li>
+        <li><a href="#type">Type</a></li>
+        <li><a href="#space">Spacing &amp; radius</a></li>
+        <li><a href="#components">Components</a></li>
+        <li><a href="#motion">Motion</a></li>
+        <li><a href="#voice">Voice</a></li>
+        <li><a href="#rules">Hard rules</a></li>
+        <li><a href="#anti">Anti-patterns</a></li>
+      </ol>
+    </nav>
+
+    <!-- ─────────── BODY ─────────── -->
+    <div class="body">
+
+      <!-- 1 BRAND -->
+      <section class="s" id="brand">
+        <header>
+          <h2><span class="num">01</span>Brand at a glance</h2>
+          <p class="sec-desc">Athletic, plain-spoken, captain-to-captain. Confident but not aggressive. Honest about being early-stage. Not corporate SaaS. Not Nike swagger. Not bro-fitness.</p>
+        </header>
+
+        <div class="demo">
+          <div class="demo-label">Brand moment · Hero card pattern</div>
+          <div class="card-accent">
+            <div class="card-eyebrow" style="color: var(--orange-500)">
+              <span class="pill orange mono">Coach early access</span>
+            </div>
+            <div style="font-size: 28px; line-height: 34px; font-weight: 500; letter-spacing: -0.4px; margin: 14px 0 8px;">
+              Your dashboard will come alive as you add data.
+            </div>
+            <div class="card-meta">Add your first player to unlock benchmark trends.</div>
+            <div style="display: flex; gap: 10px; margin-top: 20px;">
+              <button class="btn btn-primary" style="min-height: 44px; padding: 10px 18px;">Add a player</button>
+              <button class="btn btn-secondary" style="min-height: 44px; padding: 10px 18px;">Skip for now</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2 COLOR -->
+      <section class="s" id="color">
+        <header>
+          <h2><span class="num">02</span>Color</h2>
+          <p class="sec-desc">Dark mode is the only mode. End Zone Orange has one job — interactive. Everything else is restraint: alpha-on-white text, semantic supporting colors used sparingly, category and team colors reserved for the surfaces that need them.</p>
+        </header>
+
+        <div class="sub-h">Surfaces</div>
+        <div class="swatch-grid">
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#08090B"></div></div><div class="meta"><span class="name">Base</span><span class="hex">#08090B</span><span class="token">surface.base</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#141417"></div></div><div class="meta"><span class="name">Raised · cards</span><span class="hex">#141417</span><span class="token">surface.raised</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#1B1B20"></div></div><div class="meta"><span class="name">Overlay · modals</span><span class="hex">#1B1B20</span><span class="token">surface.overlay</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#2D3850"></div></div><div class="meta"><span class="name">Elevated · tags</span><span class="hex">#2D3850</span><span class="token">surface.elevated</span></div></div>
+          <div class="swatch checker"><div class="chip"><div class="chip-fill" style="background:rgba(255,255,255,0.04)"></div></div><div class="meta"><span class="name">Muted hover</span><span class="hex">rgba(255,255,255,0.04)</span><span class="token">surface.muted</span></div></div>
+          <div class="swatch checker"><div class="chip"><div class="chip-fill" style="background:rgba(255,255,255,0.08)"></div></div><div class="meta"><span class="name">Pressed</span><span class="hex">rgba(255,255,255,0.08)</span><span class="token">surface.pressed</span></div></div>
+        </div>
+
+        <div class="sub-h">Text · alpha on near-white</div>
+        <div class="swatch-grid">
+          <div class="text-swatch"><div class="sample" style="color: #F4F4F2">The quick brown fox</div><div class="name">text.primary</div><div class="hex">#F4F4F2</div></div>
+          <div class="text-swatch"><div class="sample" style="color: rgba(244,244,242,0.82)">The quick brown fox</div><div class="name">text.label</div><div class="hex">F4F4F2 · 82%</div></div>
+          <div class="text-swatch"><div class="sample" style="color: #8A8A92">The quick brown fox</div><div class="name">text.secondary</div><div class="hex">#8A8A92</div></div>
+          <div class="text-swatch"><div class="sample" style="color: rgba(244,244,242,0.55)">The quick brown fox</div><div class="name">text.subtle</div><div class="hex">F4F4F2 · 55%</div></div>
+          <div class="text-swatch"><div class="sample" style="color: #5A5A62">The quick brown fox</div><div class="name">text.muted</div><div class="hex">#5A5A62</div></div>
+        </div>
+
+        <div class="sub-h">Borders</div>
+        <div class="swatch-grid">
+          <div class="swatch"><div class="chip" style="background:#0F0F12; display:grid; place-items:center;"><div style="width: 80%; height: 60%; border: 1px solid rgba(255,255,255,0.04); border-radius: 10px;"></div></div><div class="meta"><span class="name">Subtle</span><span class="hex">rgba(255,255,255,0.04)</span><span class="token">border.subtle</span></div></div>
+          <div class="swatch"><div class="chip" style="background:#0F0F12; display:grid; place-items:center;"><div style="width: 80%; height: 60%; border: 1px solid rgba(255,255,255,0.08); border-radius: 10px;"></div></div><div class="meta"><span class="name">Default</span><span class="hex">rgba(255,255,255,0.08)</span><span class="token">border.default</span></div></div>
+          <div class="swatch"><div class="chip" style="background:#0F0F12; display:grid; place-items:center;"><div style="width: 80%; height: 60%; border: 1px solid #1F1F25; border-radius: 10px;"></div></div><div class="meta"><span class="name">Card</span><span class="hex">#1F1F25</span><span class="token">border.card</span></div></div>
+          <div class="swatch"><div class="chip" style="background:#0F0F12; display:grid; place-items:center;"><div style="width: 80%; height: 60%; border: 1px solid #26262C; border-radius: 10px;"></div></div><div class="meta"><span class="name">Strong</span><span class="hex">#26262C</span><span class="token">border.strong</span></div></div>
+        </div>
+
+        <div class="sub-h">Brand · End zone orange</div>
+        <div class="swatch-grid">
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#FF8A4A"></div></div><div class="meta"><span class="name">Orange 400 · hover, tag text</span><span class="hex">#FF8A4A</span><span class="token">orange.400</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#FF6A1A; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);"></div></div><div class="meta"><span class="name">Orange 500 · primary</span><span class="hex">#FF6A1A</span><span class="token">orange.500</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#B84200"></div></div><div class="meta"><span class="name">Orange 600 · pressed</span><span class="hex">#B84200</span><span class="token">orange.600</span></div></div>
+          <div class="swatch"><div class="chip" style="background:#141417"><div class="chip-fill" style="background:rgba(255, 106, 26, 0.14)"></div></div><div class="meta"><span class="name">Tint · selected fill</span><span class="hex">FF6A1A · 14%</span><span class="token">orange.tint</span></div></div>
+          <div class="swatch"><div class="chip" style="background:#141417; display:grid; place-items:center;"><div style="width: 80%; height: 60%; border: 1px solid rgba(255, 106, 26, 0.30); border-radius: 10px;"></div></div><div class="meta"><span class="name">Tint border</span><span class="hex">FF6A1A · 30%</span><span class="token">orange.tintBorder</span></div></div>
+          <div class="swatch"><div class="chip" style="background:#141417; position:relative;"><div style="position: absolute; inset: 10px; border-radius: 14px; box-shadow: 0 0 40px 8px rgba(255, 106, 26, 0.35);"></div></div><div class="meta"><span class="name">Glow · focal hero</span><span class="hex">FF6A1A · 35%</span><span class="token">orange.glow</span></div></div>
+        </div>
+
+        <div class="sub-h">Semantic · supporting families</div>
+        <div class="swatch-grid">
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#C2FF3D"></div></div><div class="meta"><span class="name">Lime 400 · positive deltas</span><span class="hex">#C2FF3D</span><span class="token">lime.400</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#4ADE80"></div></div><div class="meta"><span class="name">Green 400 · positive signal</span><span class="hex">#4ADE80</span><span class="token">green.400</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#6EA8FF"></div></div><div class="meta"><span class="name">Blue 400 · data, charts</span><span class="hex">#6EA8FF</span><span class="token">blue.400</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#818CF8"></div></div><div class="meta"><span class="name">Indigo 400 · study, IQ</span><span class="hex">#818CF8</span><span class="token">indigo.400</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#FF4D4D"></div></div><div class="meta"><span class="name">Red · defense, destructive</span><span class="hex">#FF4D4D</span><span class="token">red.semantic</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#EF4444"></div></div><div class="meta"><span class="name">Error</span><span class="hex">#EF4444</span><span class="token">error</span></div></div>
+        </div>
+
+        <div class="sub-h">Category · drill phases</div>
+        <div class="demo" style="padding: 24px;">
+          <div class="demo-row">
+            <span class="cat-pill cat-offense"><span class="cat-dot" style="background: var(--orange-500)"></span>Offense</span>
+            <span class="cat-pill cat-defense"><span class="cat-dot" style="background: var(--red-semantic)"></span>Defense</span>
+            <span class="cat-pill cat-footwork"><span class="cat-dot" style="background: var(--lime-400)"></span>Footwork</span>
+            <span class="cat-pill cat-routes"><span class="cat-dot" style="background: var(--blue-400)"></span>Routes</span>
+            <span class="cat-pill cat-footwork"><span class="cat-dot" style="background: var(--lime-400)"></span>Agility</span>
+            <span class="cat-pill cat-offense"><span class="cat-dot" style="background: var(--orange-400)"></span>Conditioning</span>
+            <span class="cat-pill cat-neutral"><span class="cat-dot" style="background: var(--text-secondary)"></span>Warmup</span>
+            <span class="cat-pill cat-neutral"><span class="cat-dot" style="background: var(--text-secondary)"></span>Cooldown</span>
+            <span class="cat-pill cat-defense"><span class="cat-dot" style="background: var(--red-semantic)"></span>Flag pulling</span>
+            <span class="cat-pill cat-neutral"><span class="cat-dot" style="background: var(--text-muted)"></span>Other</span>
+          </div>
+        </div>
+
+        <div class="sub-h">Team palette · 8 swatches</div>
+        <p style="color: var(--text-secondary); font-size: 13px; margin-bottom: 16px;">Mirrors the <code style="font-family: var(--font-mono); font-size: 12px; color: var(--text-primary)">teams_team_color_chk</code> SQL constraint. Any change here must be matched in migration 13.</p>
+        <div class="swatch-grid">
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#FF6A1A"></div></div><div class="meta"><span class="name">Orange</span><span class="hex">#FF6A1A</span><span class="token">team.orange</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#C2FF3D"></div></div><div class="meta"><span class="name">Lime</span><span class="hex">#C2FF3D</span><span class="token">team.lime</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#6EA8FF"></div></div><div class="meta"><span class="name">Blue</span><span class="hex">#6EA8FF</span><span class="token">team.blue</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#FF4D4D"></div></div><div class="meta"><span class="name">Red</span><span class="hex">#FF4D4D</span><span class="token">team.red</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#B89BFF"></div></div><div class="meta"><span class="name">Violet</span><span class="hex">#B89BFF</span><span class="token">team.violet</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#7DDFD2"></div></div><div class="meta"><span class="name">Cyan</span><span class="hex">#7DDFD2</span><span class="token">team.cyan</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#FF6A8B"></div></div><div class="meta"><span class="name">Pink</span><span class="hex">#FF6A8B</span><span class="token">team.pink</span></div></div>
+          <div class="swatch"><div class="chip"><div class="chip-fill" style="background:#FFB347"></div></div><div class="meta"><span class="name">Gold</span><span class="hex">#FFB347</span><span class="token">team.gold</span></div></div>
+        </div>
+      </section>
+
+      <!-- 3 TYPE -->
+      <section class="s" id="type">
+        <header>
+          <h2><span class="num">03</span>Type</h2>
+          <p class="sec-desc">Inter for everything human-readable. JetBrains Mono for anything numeric — stats, times, scores, scoreboards. Tabular numbers always on for mono. Never bold a sans heading you could solve with size.</p>
+        </header>
+
+        <div class="font-cards">
+          <div class="font-card sans">
+            <div class="name">Inter · Sans</div>
+            <div class="big">Aa</div>
+            <div class="weights">
+              <span>400 Regular</span>
+              <span>500 Medium</span>
+              <span>600 Semibold</span>
+              <span>700 Bold</span>
+            </div>
+          </div>
+          <div class="font-card mono">
+            <div class="name">JetBrains Mono · Numerics</div>
+            <div class="big">42.7</div>
+            <div class="weights">
+              <span>500 Medium</span>
+              <span>700 Bold · tabular</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="sub-h">Scale</div>
+        <div>
+          <div class="type-row"><span class="label">Display</span><span class="spec">38 / 42 · 600</span><span class="sample t-display">Train smarter.</span></div>
+          <div class="type-row"><span class="label">Stat</span><span class="spec">28 / 34 · mono 700</span><span class="sample t-stat t-mono">42.7s · 3,210</span></div>
+          <div class="type-row"><span class="label">Title</span><span class="spec">20 / 28 · 500</span><span class="sample t-title">Practice plan — Tuesday</span></div>
+          <div class="type-row"><span class="label">Heading</span><span class="spec">17 / 24 · 500</span><span class="sample t-heading">Footwork ladder · 12 min</span></div>
+          <div class="type-row"><span class="label">Body</span><span class="spec">15 / 22 · 400</span><span class="sample t-body">Pull drills from your library and drag them into the slots. Each drill keeps its category color so phases stay visually distinct.</span></div>
+          <div class="type-row"><span class="label">Caption</span><span class="spec">13 / 18 · 400</span><span class="sample t-caption">Last logged 2 days ago by Coach Mia</span></div>
+          <div class="type-row"><span class="label">Micro / eyebrow</span><span class="spec">11 / 14 · 700 · 0.5px</span><span class="sample t-micro">Get started</span></div>
+        </div>
+
+        <div class="sub-h">Rules</div>
+        <div class="rules">
+          <div class="rule"><span class="num">01</span><div class="body"><strong>Sentence case everywhere.</strong><em>Never Title Case. ALL CAPS only at 11px micro-labels.</em></div></div>
+          <div class="rule"><span class="num">02</span><div class="body"><strong>No em dashes.</strong><em>Use commas, periods, or rewrite the sentence.</em></div></div>
+          <div class="rule"><span class="num">03</span><div class="body"><strong>American English.</strong><em>"Color," not "colour." "Practice," not "practise."</em></div></div>
+          <div class="rule"><span class="num">04</span><div class="body"><strong>Mobile headings never exceed two lines.</strong><em>Rewrite shorter, don't shrink type.</em></div></div>
+          <div class="rule"><span class="num">05</span><div class="body"><strong>Numbers use mono with tabular figures.</strong><em>Times, scores, counts, deltas — never sans.</em></div></div>
+          <div class="rule"><span class="num">06</span><div class="body"><strong>Letter-spacing is tight at display, loose at micro.</strong><em>−0.4 to −0.8 at 28px+, +0.5 at 11px.</em></div></div>
+        </div>
+      </section>
+
+      <!-- 4 SPACE -->
+      <section class="s" id="space">
+        <header>
+          <h2><span class="num">04</span>Spacing &amp; radius</h2>
+          <p class="sec-desc">Base unit is 4. Don't invent a 14px gap; pick the next token. Radii are similarly opinionated — inputs always 10, cards always 18, hero treatments always 24.</p>
+        </header>
+
+        <div class="sub-h">Spacing</div>
+        <div>
+          <div class="scale-row"><span class="key">xs</span><span class="val">4 px</span><div class="bar" style="width: 4px"></div><span class="desc">Inline tight gaps, icon-to-text inside chips</span></div>
+          <div class="scale-row"><span class="key">sm</span><span class="val">8 px</span><div class="bar" style="width: 8px"></div><span class="desc">Label-to-input, sibling pills</span></div>
+          <div class="scale-row"><span class="key">md</span><span class="val">12 px</span><div class="bar" style="width: 12px"></div><span class="desc">Inside-card field stacks</span></div>
+          <div class="scale-row"><span class="key">lg</span><span class="val">16 px</span><div class="bar" style="width: 16px"></div><span class="desc">Card-to-card within a section</span></div>
+          <div class="scale-row"><span class="key">xl</span><span class="val">20 px</span><div class="bar" style="width: 20px"></div><span class="desc">Screen horizontal padding · mobile</span></div>
+          <div class="scale-row"><span class="key">2xl</span><span class="val">24 px</span><div class="bar" style="width: 24px"></div><span class="desc">Hero card inner padding</span></div>
+          <div class="scale-row"><span class="key">3xl</span><span class="val">32 px</span><div class="bar" style="width: 32px"></div><span class="desc">Between major sections</span></div>
+        </div>
+
+        <div class="sub-h">Radius</div>
+        <div>
+          <div class="scale-row"><span class="key">sm</span><span class="val">6 px</span><div class="ring" style="border-radius: 6px;"></div><span class="desc">Tiny chips, indicator dots, internal markers</span></div>
+          <div class="scale-row"><span class="key">md</span><span class="val">8 px</span><div class="ring" style="border-radius: 8px;"></div><span class="desc">Compact buttons, small surfaces</span></div>
+          <div class="scale-row"><span class="key">input</span><span class="val">10 px</span><div class="ring" style="border-radius: 10px;"></div><span class="desc">All form inputs</span></div>
+          <div class="scale-row"><span class="key">lg</span><span class="val">12 px</span><div class="ring" style="border-radius: 12px;"></div><span class="desc">Standard component containers</span></div>
+          <div class="scale-row"><span class="key">xl</span><span class="val">14 px</span><div class="ring" style="border-radius: 14px;"></div><span class="desc">Buttons, secondary cards</span></div>
+          <div class="scale-row"><span class="key">card</span><span class="val">18 px</span><div class="ring" style="border-radius: 18px;"></div><span class="desc">Canonical UFF card</span></div>
+          <div class="scale-row"><span class="key">pill</span><span class="val">20 px</span><div class="ring" style="border-radius: 20px;"></div><span class="desc">Tags, pills, status chips</span></div>
+          <div class="scale-row"><span class="key">hero</span><span class="val">24 px</span><div class="ring" style="border-radius: 24px;"></div><span class="desc">Top-of-screen hero / focal cards</span></div>
+          <div class="scale-row"><span class="key">full</span><span class="val">9999</span><div class="ring" style="border-radius: 9999px;"></div><span class="desc">Avatars, indicator dots</span></div>
+        </div>
+      </section>
+
+      <!-- 5 COMPONENTS -->
+      <section class="s" id="components">
+        <header>
+          <h2><span class="num">05</span>Components</h2>
+          <p class="sec-desc">The canonical card is the visual signature of UFF: 18px radius, dark surface, 2px orange top edge, faint bloom from the top. Everything else hangs off that grammar.</p>
+        </header>
+
+        <!-- Cards -->
+        <div class="sub-h">Cards · four variants</div>
+        <div class="demo-grid">
+          <div class="card-canonical">
+            <div class="card-eyebrow"><span style="display:inline-block; width:3px; height:12px; background: var(--orange-500); border-radius: 2px; margin-right: 8px; transform: translateY(2px);"></span>Outlined · canonical</div>
+            <div class="card-title">Drill library</div>
+            <div class="card-meta">23 drills across 4 phases. Pull from this list when planning practice.</div>
+          </div>
+          <div class="card-surface">
+            <div class="card-eyebrow">Surface · neutral</div>
+            <div class="card-title">Roster overview</div>
+            <div class="card-meta">12 players, 3 lines. Default baseline card.</div>
+          </div>
+          <div class="card-filled">
+            <div class="card-eyebrow">Filled · subdued</div>
+            <div class="card-title">Last practice</div>
+            <div class="card-meta">Tuesday · 60 min · 4 drills logged.</div>
+          </div>
+          <div class="card-accent">
+            <div class="card-eyebrow" style="color: var(--orange-500)">Accent · hero</div>
+            <div class="card-title" style="font-size: 22px; line-height: 28px;">You're on a 4-week streak.</div>
+            <div class="card-meta">Log this week to keep it alive.</div>
+          </div>
+        </div>
+
+        <!-- Buttons -->
+        <div class="sub-h">Buttons</div>
+        <div class="demo">
+          <div class="demo-label">Three variants · all 52px min height · 14px radius</div>
+          <div class="demo-row">
+            <button class="btn btn-primary">Add a player</button>
+            <button class="btn btn-secondary">Skip for now</button>
+            <button class="btn btn-destructive">Sign out</button>
+            <button class="btn btn-primary btn-disabled">Disabled</button>
+          </div>
+        </div>
+
+        <!-- Tags -->
+        <div class="sub-h">Tags · multi-select</div>
+        <div class="demo">
+          <div class="demo-label">36px min height · 20px radius · 1.5px border when selected</div>
+          <div class="demo-row">
+            <span class="tag selected">Offense</span>
+            <span class="tag">Defense</span>
+            <span class="tag selected">Footwork</span>
+            <span class="tag">Routes</span>
+            <span class="tag">Agility</span>
+            <span class="tag">Conditioning</span>
+          </div>
+        </div>
+
+        <!-- Pills -->
+        <div class="sub-h">Pills · status, count, mono</div>
+        <div class="demo">
+          <div class="demo-label">11px label · 20px radius · 4 variants</div>
+          <div class="demo-row">
+            <span class="pill default">New</span>
+            <span class="pill orange">Coach early access</span>
+            <span class="pill lime">+2.3s</span>
+            <span class="pill ghost">Draft</span>
+            <span class="pill orange mono">12 / 23</span>
+            <span class="pill default mono">QB</span>
+          </div>
+        </div>
+
+        <!-- Inputs -->
+        <div class="sub-h">Inputs</div>
+        <div class="demo">
+          <div class="demo-label">10px radius · 44px min height · uppercase label at 11px</div>
+          <div class="demo-grid">
+            <div class="input-group">
+              <label class="input-label">Player name</label>
+              <input class="input" placeholder="e.g. Mia Rodriguez" />
+            </div>
+            <div class="input-group">
+              <label class="input-label">Jersey number</label>
+              <input class="input" placeholder="00" style="font-family: var(--font-mono); letter-spacing: 1px;" />
+            </div>
+          </div>
+        </div>
+
+        <!-- Eyebrow -->
+        <div class="sub-h">Eyebrows · section labels</div>
+        <div class="demo">
+          <div class="demo-label">11px · 700 · 1.5px tracking · optional 3×14 orange tick</div>
+          <div style="display: flex; flex-direction: column; gap: 16px;">
+            <div class="eyebrow"><span class="tick"></span>Get started</div>
+            <div class="eyebrow dim"><span class="tick"></span>Recent activity</div>
+            <div class="eyebrow brand"><span class="tick"></span>Coach insights</div>
+            <div class="eyebrow">Eyebrow without tick</div>
+          </div>
+        </div>
+
+        <!-- Stat -->
+        <div class="sub-h">Stats · mono with tabular figures</div>
+        <div class="demo">
+          <div class="demo-label">JetBrains Mono · 32px bold · tight tracking · optional delta + spark</div>
+          <div class="demo-grid three">
+            <div class="stat-block">
+              <div class="stat-num">4.7<span class="stat-unit">s</span><span class="stat-delta">−0.3</span></div>
+              <div class="stat-label">40 yd dash</div>
+            </div>
+            <div class="stat-block">
+              <div class="stat-num">87<span class="stat-delta">+12</span></div>
+              <div class="stat-label">Reps logged</div>
+            </div>
+            <div class="stat-block">
+              <div class="stat-num">12<span class="stat-unit">/ 23</span></div>
+              <div class="stat-label">Drills completed</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 6 MOTION -->
+      <section class="s" id="motion">
+        <header>
+          <h2><span class="num">06</span>Motion</h2>
+          <p class="sec-desc">Motion serves feedback, not decoration. Press states are 80ms scale-down to 0.97. Section reveals stay under 350ms. If a loader spins for more than a second, you should have shown a skeleton instead.</p>
+        </header>
+
+        <div class="demo">
+          <div class="demo-label">Allowed motion</div>
+          <table class="motion-table">
+            <thead>
+              <tr><th>Use case</th><th>Duration</th><th>Easing</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Section entry</td><td>220 ms</td><td>ease-out</td><td>Fade + 8px translate-up</td></tr>
+              <tr><td>Hover (web)</td><td>150 ms</td><td>ease-out</td><td>Opacity 0.85, color shift only</td></tr>
+              <tr><td>Press (mobile)</td><td>80 ms</td><td>ease-out</td><td>Scale 0.97, paired with haptic light</td></tr>
+              <tr><td>Scroll reveal (landing)</td><td>350 ms</td><td>ease-out</td><td>Fade + 12px up · 80ms stagger</td></tr>
+              <tr><td>Tag toggle</td><td>120 ms</td><td>ease-out</td><td>Border, color, background cross-fade</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="donts">
+          <div class="dont"><span class="x">×</span>Scroll-jacking sections</div>
+          <div class="dont"><span class="x">×</span>Heavy parallax</div>
+          <div class="dont"><span class="x">×</span>Gradient flashes during streaming</div>
+          <div class="dont"><span class="x">×</span>Auto-playing video</div>
+          <div class="dont"><span class="x">×</span>Spinners over 1 second — use skeletons</div>
+          <div class="dont"><span class="x">×</span>Motion that delays interaction</div>
+        </div>
+      </section>
+
+      <!-- 7 VOICE -->
+      <section class="s" id="voice">
+        <header>
+          <h2><span class="num">07</span>Voice</h2>
+          <p class="sec-desc">Captain-to-captain. Like one coach telling another "yeah, we built this, here's what it does." Plain English, concrete verbs, honest about stage. No exclamation points unless something genuinely warrants one.</p>
+        </header>
+
+        <div class="voice">
+          <div class="col good">
+            <div class="tag-row">Do · captain voice</div>
+            <p><strong style="font-weight: 500;">"Add your first player to unlock benchmark trends."</strong></p>
+            <p>Pull drills from your library and drag them into Tuesday's slots.</p>
+            <p>You're on a 4-week streak. Log this week to keep it.</p>
+            <p>Last practice was 4 days ago. Want to plan the next one?</p>
+          </div>
+          <div class="col bad">
+            <div class="tag-row">Don't · SaaS voice</div>
+            <p>Streamline your drill workflow with AI-powered insights!</p>
+            <p>Unlock the full potential of your roster — sign up today.</p>
+            <p>Crush your goals with our cutting-edge benchmark suite.</p>
+            <p>Coaches love us — join the revolution in player development.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 8 RULES -->
+      <section class="s" id="rules">
+        <header>
+          <h2><span class="num">08</span>Hard rules</h2>
+          <p class="sec-desc">The non-negotiables. Anything outside these is a system-level decision, not a screen-level one.</p>
+        </header>
+
+        <div class="rules">
+          <div class="rule"><span class="num">01</span><div class="body"><strong>Dark mode only.</strong><em>surface.base everywhere. No light mode in scope.</em></div></div>
+          <div class="rule"><span class="num">02</span><div class="body"><strong>Orange has one job.</strong><em>Interactive: CTAs, selected states, brand moment. Never decorative.</em></div></div>
+          <div class="rule"><span class="num">03</span><div class="body"><strong>Sentence case.</strong><em>ALL CAPS only at 11px micro-labels.</em></div></div>
+          <div class="rule"><span class="num">04</span><div class="body"><strong>Touch targets ≥ 44 × 44.</strong><em>Use hitSlop to extend if visual size is smaller.</em></div></div>
+          <div class="rule"><span class="num">05</span><div class="body"><strong>20px screen horizontal padding, single column.</strong><em>Mobile is the primary surface.</em></div></div>
+          <div class="rule"><span class="num">06</span><div class="body"><strong>Every card gets a border.</strong><em>border-subtle minimum. No borderless floating cards on dark.</em></div></div>
+          <div class="rule"><span class="num">07</span><div class="body"><strong>Locked insight copy: "Add X to unlock Y."</strong><em>Never guilt. Never gate behind dark patterns.</em></div></div>
+          <div class="rule"><span class="num">08</span><div class="body"><strong>All tags in a group share the selected color.</strong><em>Orange. No exceptions.</em></div></div>
+          <div class="rule"><span class="num">09</span><div class="body"><strong>Numbers always mono with tabular figures.</strong><em>Times, scores, counts, deltas.</em></div></div>
+          <div class="rule"><span class="num">10</span><div class="body"><strong>Varied vertical rhythm.</strong><em>32px between sections, 16px between cards, 12px inside. Uniform = flat.</em></div></div>
+        </div>
+      </section>
+
+      <!-- 9 ANTI-PATTERNS -->
+      <section class="s" id="anti">
+        <header>
+          <h2><span class="num">09</span>Anti-patterns</h2>
+          <p class="sec-desc">If you're tempted to do any of these, the answer is a different solution at the system level, not a workaround at the screen level.</p>
+        </header>
+
+        <div class="donts">
+          <div class="dont"><span class="x">×</span>Orange used decoratively or as a tint</div>
+          <div class="dont"><span class="x">×</span>Gradients on brand surfaces (the card bloom is the only allowed one)</div>
+          <div class="dont"><span class="x">×</span>A third type weight beyond what's defined</div>
+          <div class="dont"><span class="x">×</span>ALL CAPS outside 11px micro-labels</div>
+          <div class="dont"><span class="x">×</span>Em dashes in any drafted copy</div>
+          <div class="dont"><span class="x">×</span>Stock photography of generic athletes</div>
+          <div class="dont"><span class="x">×</span>Fake testimonials, social proof, or logo walls</div>
+          <div class="dont"><span class="x">×</span>Borderless floating cards on dark surfaces</div>
+          <div class="dont"><span class="x">×</span>Filled and outline icons mixed on one screen</div>
+          <div class="dont"><span class="x">×</span>Emoji in production UI or marketing copy</div>
+          <div class="dont"><span class="x">×</span>Pure #000 backgrounds or #FFF text</div>
+          <div class="dont"><span class="x">×</span>Sans-serif numbers on stats or scoreboards</div>
+        </div>
+      </section>
+
+      <!-- Footer -->
+      <footer style="margin-top: 80px; padding-top: 32px; border-top: 1px solid var(--border-default); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+        <div style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); letter-spacing: 0.5px;">
+          UFF MOBILE · DESIGN SYSTEM · v2.0
+        </div>
+        <div style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); letter-spacing: 0.5px;">
+          Source of truth: <span style="color: var(--text-secondary)">constants/design.ts</span>
+        </div>
+      </footer>
+
+    </div>
+  </div>
+</div>
+</body>
+</html>

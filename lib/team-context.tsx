@@ -6,62 +6,94 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "./supabase";
 import { useAuth } from "./auth-context";
+
+export type AvailableTeam = {
+  id: string;
+  name: string;
+  format: string | null;
+  color: string | null;
+  role: string | null;
+};
 
 export type TeamContextValue = {
   teamId: string | null;
   teamName: string | null;
+  teamFormat: string | null;
+  teamColor: string | null;
   userRole: string | null;
   hasTeam: boolean;
   loading: boolean;
+  availableTeams: AvailableTeam[];
+  selectTeam: (teamId: string) => Promise<void>;
   refreshTeam: () => Promise<void>;
 };
 
 const TeamContext = createContext<TeamContextValue | undefined>(undefined);
 
+const SELECTED_TEAM_KEY = "uff:selected-team-id";
+
 export function TeamProvider({ children }: { children: ReactNode }) {
   const { user, loading: authLoading } = useAuth();
+  const [availableTeams, setAvailableTeams] = useState<AvailableTeam[]>([]);
   const [teamId, setTeamId] = useState<string | null>(null);
-  const [teamName, setTeamName] = useState<string | null>(null);
-  const [userRole, setUserRole] = useState<string | null>(null);
-  const [hasTeam, setHasTeam] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const loadTeam = useCallback(async (userId: string) => {
-    const { data, error } = await supabase
-      .from("team_members")
-      .select("team_id, role, teams(team_name)")
-      .eq("user_id", userId)
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      console.error("[team-context] membership lookup failed", error);
-      setTeamId(null);
-      setTeamName(null);
-      setUserRole(null);
-      setHasTeam(false);
-      return;
-    }
-
-    if (data) {
-      const teams = data.teams as
-        | { team_name: string }
-        | { team_name: string }[]
-        | null;
-      const name = Array.isArray(teams) ? teams[0]?.team_name : teams?.team_name;
-      setTeamId(data.team_id);
-      setTeamName(name ?? null);
-      setUserRole(data.role);
-      setHasTeam(true);
-    } else {
-      setTeamId(null);
-      setTeamName(null);
-      setUserRole(null);
-      setHasTeam(false);
-    }
+  const reset = useCallback(() => {
+    setAvailableTeams([]);
+    setTeamId(null);
   }, []);
+
+  // Load all team memberships for the user, then resolve which one is
+  // "active" — the previously selected team if it's still a valid
+  // membership, otherwise the first one. The active team id flows through
+  // the rest of the app via the existing `teamId` field.
+  const loadTeams = useCallback(
+    async (userId: string) => {
+      const { data, error } = await supabase
+        .from("team_members")
+        .select("team_id, role, teams(team_name, format, team_color)")
+        .eq("user_id", userId);
+
+      if (error) {
+        console.error("[team-context] memberships lookup failed", error);
+        reset();
+        return;
+      }
+
+      const next: AvailableTeam[] = (data ?? []).flatMap((row) => {
+        const team = Array.isArray(row.teams) ? row.teams[0] : row.teams;
+        if (!team || !row.team_id) return [];
+        return [
+          {
+            id: row.team_id,
+            name: team.team_name ?? "Untitled team",
+            format: team.format ?? null,
+            color: team.team_color ?? null,
+            role: row.role ?? null,
+          },
+        ];
+      });
+
+      setAvailableTeams(next);
+
+      if (next.length === 0) {
+        setTeamId(null);
+        return;
+      }
+
+      const stored = await AsyncStorage.getItem(SELECTED_TEAM_KEY).catch(
+        () => null,
+      );
+      const validStored = stored && next.some((t) => t.id === stored)
+        ? stored
+        : null;
+      setTeamId(validStored ?? next[0].id);
+    },
+    [reset],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -69,34 +101,56 @@ export function TeamProvider({ children }: { children: ReactNode }) {
     if (authLoading) return;
 
     if (!user) {
-      setTeamId(null);
-      setTeamName(null);
-      setUserRole(null);
-      setHasTeam(false);
+      reset();
       setLoading(false);
       return;
     }
 
     setLoading(true);
-    loadTeam(user.id).finally(() => {
+    loadTeams(user.id).finally(() => {
       if (!cancelled) setLoading(false);
     });
 
     return () => {
       cancelled = true;
     };
-  }, [user, authLoading, loadTeam]);
+  }, [user, authLoading, loadTeams, reset]);
+
+  const selectTeam = useCallback(
+    async (nextTeamId: string) => {
+      // Only honor selections the user actually belongs to — guards against
+      // a stale dashboard call selecting a team that was just left/removed.
+      const valid = availableTeams.some((t) => t.id === nextTeamId);
+      if (!valid) return;
+      setTeamId(nextTeamId);
+      await AsyncStorage.setItem(SELECTED_TEAM_KEY, nextTeamId).catch(() => {});
+    },
+    [availableTeams],
+  );
 
   const refreshTeam = useCallback(async () => {
     if (!user) return;
     setLoading(true);
-    await loadTeam(user.id);
+    await loadTeams(user.id);
     setLoading(false);
-  }, [user, loadTeam]);
+  }, [user, loadTeams]);
+
+  const active = availableTeams.find((t) => t.id === teamId) ?? null;
 
   return (
     <TeamContext.Provider
-      value={{ teamId, teamName, userRole, hasTeam, loading, refreshTeam }}
+      value={{
+        teamId,
+        teamName: active?.name ?? null,
+        teamFormat: active?.format ?? null,
+        teamColor: active?.color ?? null,
+        userRole: active?.role ?? null,
+        hasTeam: !!active,
+        loading,
+        availableTeams,
+        selectTeam,
+        refreshTeam,
+      }}
     >
       {children}
     </TeamContext.Provider>
