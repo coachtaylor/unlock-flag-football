@@ -3,10 +3,13 @@ import {
   Alert,
   Animated,
   Easing,
+  LayoutAnimation,
+  Platform,
   RefreshControl,
   ScrollView,
   Text,
   TouchableOpacity,
+  UIManager,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -23,6 +26,15 @@ import { supabase } from "../../../lib/supabase";
 import { useTeam } from "../../../lib/team-context";
 
 const PADH = spacing.lg; // 16 — content column padding
+
+// LayoutAnimation needs an opt-in on (old-arch) Android for the
+// collapse/expand of practice sections to animate.
+if (
+  Platform.OS === "android" &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 type PlanStatus = "draft" | "scheduled" | "live" | "completed";
 
@@ -425,23 +437,20 @@ function GroupHeader({
   count,
   color,
   trailing,
+  collapsible,
+  collapsed,
+  onToggle,
 }: {
   label: string;
   count?: number;
   color: string;
   trailing?: React.ReactNode;
+  collapsible?: boolean;
+  collapsed?: boolean;
+  onToggle?: () => void;
 }) {
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 10,
-        paddingHorizontal: PADH,
-        paddingTop: spacing["2xl"],
-        paddingBottom: spacing.sm,
-      }}
-    >
+  const inner = (
+    <>
       <View
         style={{ width: 4, height: 12, borderRadius: 2, backgroundColor: color }}
       />
@@ -472,8 +481,39 @@ function GroupHeader({
         }}
       />
       {trailing}
-    </View>
+      {collapsible && (
+        <Ionicons
+          name={collapsed ? "chevron-down" : "chevron-up"}
+          size={15}
+          color={colors.text.muted}
+        />
+      )}
+    </>
   );
+
+  const style = {
+    flexDirection: "row" as const,
+    alignItems: "center" as const,
+    gap: 10,
+    paddingHorizontal: PADH,
+    paddingTop: spacing["2xl"],
+    paddingBottom: spacing.sm,
+  };
+
+  if (collapsible) {
+    return (
+      <TouchableOpacity
+        activeOpacity={0.7}
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: !collapsed }}
+        style={style}
+      >
+        {inner}
+      </TouchableOpacity>
+    );
+  }
+  return <View style={style}>{inner}</View>;
 }
 
 // ── cadence strip ───────────────────────────────────────────────────
@@ -1245,6 +1285,18 @@ export default function PracticeListScreen() {
   const [roster, setRoster] = useState(0);
   const [startingId, setStartingId] = useState<string | null>(null);
   const [duplicating, setDuplicating] = useState(false);
+  // Collapsed section keys (view-only state, like the detail page's
+  // expandable drill rows — not persisted).
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleSection = (key: string) => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   const load = useCallback(async () => {
     if (!teamId) return;
@@ -1668,21 +1720,26 @@ export default function PracticeListScreen() {
             <GroupHeader
               label="Up next"
               color={colors.orange[500]}
+              collapsible
+              collapsed={collapsed.has("upNext")}
+              onToggle={() => toggleSection("upNext")}
               trailing={
                 <MonoText style={{ fontSize: 10, color: colors.text.muted }}>
                   {relDay(groups.nextUp.dayOffset)}
                 </MonoText>
               }
             />
-            <HeroCard
-              plan={groups.nextUp}
-              starting={startingId === groups.nextUp.id}
-              duplicating={duplicating}
-              onOpen={() => goToPlan(groups.nextUp!.id)}
-              onStart={() => goToPlan(groups.nextUp!.id)}
-              onEdit={() => goToEdit(groups.nextUp!.id)}
-              onDuplicate={() => duplicatePlan(groups.nextUp!.id)}
-            />
+            {!collapsed.has("upNext") && (
+              <HeroCard
+                plan={groups.nextUp}
+                starting={startingId === groups.nextUp.id}
+                duplicating={duplicating}
+                onOpen={() => goToPlan(groups.nextUp!.id)}
+                onStart={() => goToPlan(groups.nextUp!.id)}
+                onEdit={() => goToEdit(groups.nextUp!.id)}
+                onDuplicate={() => duplicatePlan(groups.nextUp!.id)}
+              />
+            )}
           </>
         )}
 
@@ -1692,12 +1749,17 @@ export default function PracticeListScreen() {
               label="This week"
               count={groups.restWeek.length}
               color={colors.text.primary}
+              collapsible
+              collapsed={collapsed.has("thisWeek")}
+              onToggle={() => toggleSection("thisWeek")}
             />
-            <View style={{ paddingHorizontal: PADH, gap: 10 }}>
-              {groups.restWeek.map((p) => (
-                <PlanCard key={p.id} plan={p} onPress={() => goToPlan(p.id)} />
-              ))}
-            </View>
+            {!collapsed.has("thisWeek") && (
+              <View style={{ paddingHorizontal: PADH, gap: 10 }}>
+                {groups.restWeek.map((p) => (
+                  <PlanCard key={p.id} plan={p} onPress={() => goToPlan(p.id)} />
+                ))}
+              </View>
+            )}
           </>
         )}
 
@@ -1707,23 +1769,28 @@ export default function PracticeListScreen() {
               label="Needs Attention!"
               count={groups.needsAttention.length}
               color={colors.red.semantic}
+              collapsible
+              collapsed={collapsed.has("needsAttention")}
+              onToggle={() => toggleSection("needsAttention")}
             />
-            <View style={{ paddingHorizontal: PADH, gap: 10 }}>
-              {groups.needsAttention.map((p) => (
-                <PlanCard
-                  key={p.id}
-                  plan={p}
-                  pastDue
-                  onPress={() =>
-                    router.push(
-                      (p.status === "live"
-                        ? `/practice/${p.id}/run?pastdue=1`
-                        : `/practice/${p.id}?pastdue=1`) as never
-                    )
-                  }
-                />
-              ))}
-            </View>
+            {!collapsed.has("needsAttention") && (
+              <View style={{ paddingHorizontal: PADH, gap: 10 }}>
+                {groups.needsAttention.map((p) => (
+                  <PlanCard
+                    key={p.id}
+                    plan={p}
+                    pastDue
+                    onPress={() =>
+                      router.push(
+                        (p.status === "live"
+                          ? `/practice/${p.id}/run?pastdue=1`
+                          : `/practice/${p.id}?pastdue=1`) as never
+                      )
+                    }
+                  />
+                ))}
+              </View>
+            )}
           </>
         )}
 
@@ -1733,12 +1800,17 @@ export default function PracticeListScreen() {
               label="Drafts"
               count={groups.drafts.length}
               color={colors.text.muted}
+              collapsible
+              collapsed={collapsed.has("drafts")}
+              onToggle={() => toggleSection("drafts")}
             />
-            <View style={{ paddingHorizontal: PADH, gap: 10 }}>
-              {groups.drafts.map((p) => (
-                <PlanCard key={p.id} plan={p} onPress={() => goToPlan(p.id)} />
-              ))}
-            </View>
+            {!collapsed.has("drafts") && (
+              <View style={{ paddingHorizontal: PADH, gap: 10 }}>
+                {groups.drafts.map((p) => (
+                  <PlanCard key={p.id} plan={p} onPress={() => goToPlan(p.id)} />
+                ))}
+              </View>
+            )}
           </>
         )}
 
@@ -1748,12 +1820,17 @@ export default function PracticeListScreen() {
               label="Recent"
               count={groups.completed.length}
               color={colors.blue[400]}
+              collapsible
+              collapsed={collapsed.has("recent")}
+              onToggle={() => toggleSection("recent")}
             />
-            <View style={{ paddingHorizontal: PADH, gap: 10 }}>
-              {groups.completed.map((p) => (
-                <PlanCard key={p.id} plan={p} onPress={() => goToPlan(p.id)} />
-              ))}
-            </View>
+            {!collapsed.has("recent") && (
+              <View style={{ paddingHorizontal: PADH, gap: 10 }}>
+                {groups.completed.map((p) => (
+                  <PlanCard key={p.id} plan={p} onPress={() => goToPlan(p.id)} />
+                ))}
+              </View>
+            )}
           </>
         )}
 
@@ -1763,12 +1840,17 @@ export default function PracticeListScreen() {
               label="Archived"
               count={groups.archived.length}
               color={colors.text.muted}
+              collapsible
+              collapsed={collapsed.has("archived")}
+              onToggle={() => toggleSection("archived")}
             />
-            <View style={{ paddingHorizontal: PADH, gap: 10 }}>
-              {groups.archived.map((p) => (
-                <PlanCard key={p.id} plan={p} onPress={() => goToPlan(p.id)} />
-              ))}
-            </View>
+            {!collapsed.has("archived") && (
+              <View style={{ paddingHorizontal: PADH, gap: 10 }}>
+                {groups.archived.map((p) => (
+                  <PlanCard key={p.id} plan={p} onPress={() => goToPlan(p.id)} />
+                ))}
+              </View>
+            )}
           </>
         )}
       </ScrollView>
