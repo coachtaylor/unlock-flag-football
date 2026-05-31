@@ -103,6 +103,7 @@ type Plan = {
   title: string | null;
   status: PlanStatus;
   notes: string | null;
+  archived: boolean;
   drills: PlanDrill[];
   blocks: PlanBlockSummary[];
   breaks: PlanBreakSummary[];
@@ -677,6 +678,19 @@ export default function PracticePlanDetailScreen() {
 
     const status = normalizeStatus(planData.status as string);
 
+    // archived_at fetched separately + guarded so a pre-migration-70 schema
+    // (column missing) degrades to "not archived" instead of failing the
+    // whole detail load.
+    let archived = false;
+    const archRes = await supabase
+      .from("practice_plans")
+      .select("archived_at")
+      .eq("id", id)
+      .maybeSingle();
+    if (!archRes.error) {
+      archived = !!(archRes.data?.archived_at as string | null);
+    }
+
     const blockRowsRaw = (planData as { practice_plan_blocks?: unknown })
       .practice_plan_blocks as
       | {
@@ -730,6 +744,7 @@ export default function PracticePlanDetailScreen() {
       title: (planData.title as string | null) ?? null,
       status,
       notes: (planData.notes as string | null) ?? null,
+      archived,
       drills: drillRows,
       blocks: blockSummaries,
       breaks: breakSummaries,
@@ -1121,6 +1136,53 @@ export default function PracticePlanDetailScreen() {
         },
       ]
     );
+  };
+
+  // Archive = soft delete. Once a practice has gone live (live/completed) it
+  // can't be hard-deleted, only archived (it keeps its real status and drops
+  // out of the active lists). A live plan can still be moved back to
+  // scheduled first, which makes it deletable again.
+  const archivePlan = () => {
+    if (!plan) return;
+    Alert.alert(
+      "Archive practice?",
+      "It moves to your Archived list and out of the active practice views. You can unarchive it later.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Archive",
+          onPress: async () => {
+            setBusy(true);
+            const { error } = await supabase
+              .from("practice_plans")
+              .update({ archived_at: new Date().toISOString() })
+              .eq("id", plan.id);
+            setBusy(false);
+            if (error) {
+              Alert.alert("Couldn't archive practice", error.message);
+              return;
+            }
+            setPastDueOpen(false);
+            router.back();
+          },
+        },
+      ]
+    );
+  };
+
+  const unarchivePlan = async () => {
+    if (!plan) return;
+    setBusy(true);
+    const { error } = await supabase
+      .from("practice_plans")
+      .update({ archived_at: null })
+      .eq("id", plan.id);
+    setBusy(false);
+    if (error) {
+      Alert.alert("Couldn't unarchive practice", error.message);
+      return;
+    }
+    await load();
   };
 
   if (loading) {
@@ -2157,7 +2219,15 @@ export default function PracticePlanDetailScreen() {
         </View>
 
         {/* Actions */}
-        {plan.status !== "completed" ? (
+        {plan.archived ? (
+          <View style={{ marginTop: spacing["3xl"], gap: spacing.md }}>
+            <Button
+              label={busy ? "Unarchiving…" : "Unarchive"}
+              onPress={unarchivePlan}
+              disabled={busy}
+            />
+          </View>
+        ) : (
           <View style={{ marginTop: spacing["3xl"], gap: spacing.md }}>
             {plan.status === "draft" && (
               <Button
@@ -2198,8 +2268,25 @@ export default function PracticePlanDetailScreen() {
                 variant="secondary"
               />
             )}
+            {/* Draft/scheduled can be deleted outright; once a practice has
+                gone live (live/completed) it can only be archived. */}
+            {plan.status === "draft" || plan.status === "scheduled" ? (
+              <Button
+                label={busy ? "Deleting…" : "Delete practice"}
+                onPress={deletePlan}
+                disabled={busy}
+                variant="destructive"
+              />
+            ) : (
+              <Button
+                label={busy ? "Archiving…" : "Archive practice"}
+                onPress={archivePlan}
+                disabled={busy}
+                variant="secondary"
+              />
+            )}
           </View>
-        ) : null}
+        )}
       </ScrollView>
 
       <PracticeAttendanceSheet
@@ -2233,11 +2320,19 @@ export default function PracticePlanDetailScreen() {
               router.push(`/practice/${plan.id}/edit` as never);
             },
           },
-          {
-            label: "Delete",
-            variant: "destructive",
-            onPress: deletePlan,
-          },
+          // Draft/scheduled can be deleted outright; live/completed can only
+          // be archived.
+          plan.status === "draft" || plan.status === "scheduled"
+            ? {
+                label: "Delete",
+                variant: "destructive" as const,
+                onPress: deletePlan,
+              }
+            : {
+                label: "Archive",
+                variant: "secondary" as const,
+                onPress: archivePlan,
+              },
         ]}
       />
     </View>

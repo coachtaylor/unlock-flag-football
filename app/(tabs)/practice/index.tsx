@@ -42,6 +42,7 @@ type PlanVM = {
   completion: number | null; // completed only, 0..1
   progressMin: number | null; // live only
   pastDue: boolean; // scheduled/live but >6h past its scheduled start
+  archived: boolean; // soft-deleted (archived_at set) — hidden from active groups
 };
 
 // ── helpers ─────────────────────────────────────────────────────────
@@ -172,6 +173,7 @@ type PlanRow = {
   title: string | null;
   status: string;
   started_at?: string | null;
+  archived_at?: string | null;
   practice_plan_drills: PpdRow[] | null;
 };
 type LogRow = {
@@ -1251,7 +1253,7 @@ export default function PracticeListScreen() {
     let rows: PlanRow[] = [];
     const withStarted = await supabase
       .from("practice_plans")
-      .select(`id, practice_date, start_time, title, status, started_at, practice_plan_drills(duration_minutes, drill_order, is_water_break, team_drills(team_drill_categories(drill_categories(category_name, category_type))))`)
+      .select(`id, practice_date, start_time, title, status, started_at, archived_at, practice_plan_drills(duration_minutes, drill_order, is_water_break, team_drills(team_drill_categories(drill_categories(category_name, category_type))))`)
       .eq("team_id", teamId);
     if (withStarted.error) {
       const core = await supabase
@@ -1313,6 +1315,7 @@ export default function PracticeListScreen() {
           completion: null,
           progressMin: null,
           pastDue,
+          archived: !!r.archived_at,
         };
         if (status === "completed") {
           const log = logsByPlan.get(r.id);
@@ -1493,21 +1496,25 @@ export default function PracticeListScreen() {
       (b.practiceDate ?? "0000-00-00").localeCompare(
         a.practiceDate ?? "0000-00-00"
       );
+    // Archived (soft-deleted) plans live in their own bottom section and are
+    // excluded from every active group.
+    const active = plans.filter((p) => !p.archived);
+    const archived = plans.filter((p) => p.archived).sort(byDateDesc);
     // Stale scheduled/live practices (>6h past start) — surfaced separately.
-    const needsAttention = plans
+    const needsAttention = active
       .filter(
         (p) => p.pastDue && (p.status === "scheduled" || p.status === "live")
       )
       .sort(byDateDesc);
     const naIds = new Set(needsAttention.map((p) => p.id));
-    const live = plans
+    const live = active
       .filter((p) => p.status === "live" && !naIds.has(p.id))
       .sort(byDateDesc);
-    const upcoming = plans
+    const upcoming = active
       .filter((p) => p.status === "scheduled" && !naIds.has(p.id))
       .sort(byDateAsc);
-    const drafts = plans.filter((p) => p.status === "draft").sort(byDateAsc);
-    const completed = plans
+    const drafts = active.filter((p) => p.status === "draft").sort(byDateAsc);
+    const completed = active
       .filter((p) => p.status === "completed")
       .sort(byDateDesc);
     return {
@@ -1517,6 +1524,7 @@ export default function PracticeListScreen() {
       restWeek: upcoming.slice(1),
       drafts,
       completed,
+      archived,
     };
   }, [plans]);
 
@@ -1743,6 +1751,21 @@ export default function PracticeListScreen() {
             />
             <View style={{ paddingHorizontal: PADH, gap: 10 }}>
               {groups.completed.map((p) => (
+                <PlanCard key={p.id} plan={p} onPress={() => goToPlan(p.id)} />
+              ))}
+            </View>
+          </>
+        )}
+
+        {groups.archived.length > 0 && (
+          <>
+            <GroupHeader
+              label="Archived"
+              count={groups.archived.length}
+              color={colors.text.muted}
+            />
+            <View style={{ paddingHorizontal: PADH, gap: 10 }}>
+              {groups.archived.map((p) => (
                 <PlanCard key={p.id} plan={p} onPress={() => goToPlan(p.id)} />
               ))}
             </View>
