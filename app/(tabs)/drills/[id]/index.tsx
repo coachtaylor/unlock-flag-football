@@ -25,6 +25,8 @@ import {
   inferCategoryType,
   normalizeCategory,
 } from "../../../../constants/categories";
+import { SKILL_GROUP_META } from "../../../../constants/skill-groups";
+import { loadDrillSkills, type TaggedSkill } from "../../../../lib/skills";
 import { Button } from "../../../../components/ui/Button";
 import { colors, radius, spacing } from "../../../../constants/design";
 import { fontStyle, monoStyle } from "../../../../constants/typography";
@@ -88,6 +90,7 @@ export default function DrillDetailScreen() {
   const [categoryTypes, setCategoryTypes] = useState<
     Record<string, CategoryType>
   >({});
+  const [drillSkills, setDrillSkills] = useState<TaggedSkill[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -185,6 +188,9 @@ export default function DrillDetailScreen() {
       setCategoryNames([]);
       setCategoryTypes({});
     }
+
+    const skillsByDrill = await loadDrillSkills([id]);
+    setDrillSkills(skillsByDrill[id] ?? []);
   }, [id, teamId]);
 
   useEffect(() => {
@@ -370,11 +376,11 @@ export default function DrillDetailScreen() {
   equipmentParts.push(...equipmentOther);
   const equipmentLabel = equipmentParts.join(" · ");
 
-  // Partition categories by type, matching the form's grouping.
+  // Only phase categories surface now — the Skill/Sub-skill category axis was
+  // retired in favor of the skill taxonomy (the "Skill tags" section).
   const typeFor = (name: string): CategoryType =>
     categoryTypes[name] ?? inferCategoryType(name);
   const phaseTags = categoryNames.filter((c) => typeFor(c) === "phase");
-  const skillTags = categoryNames.filter((c) => typeFor(c) !== "phase");
 
   // Hydrate the new benchmark_config when present; fall back to the legacy
   // single-type column so pre-migration-38 drills still render meaningfully.
@@ -543,83 +549,92 @@ export default function DrillDetailScreen() {
           />
         ) : null}
 
-        {/* 02 · TAGS */}
+        {/* 02 · PHASE */}
         <Section>
-          <NumberedEyebrow index="02" label="Tags" />
-          {categoryNames.length === 0 ? (
+          <NumberedEyebrow index="02" label="Phase" />
+          {phaseTags.length === 0 ? (
             <EmptyText style={{ marginTop: spacing.md }}>
-              No tags assigned.
+              No phase set.
             </EmptyText>
           ) : (
-            <View style={{ marginTop: spacing.md, gap: spacing.md }}>
-              {phaseTags.length > 0 && (
-                <View>
-                  <MiniLabel>Phase</MiniLabel>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      flexWrap: "wrap",
-                      alignItems: "center",
-                    }}
+            <View
+              style={{
+                marginTop: spacing.md,
+                flexDirection: "row",
+                flexWrap: "wrap",
+                alignItems: "center",
+              }}
+            >
+              {phaseTags.map((name, i) => {
+                const normalized = normalizeCategory(name);
+                const phaseColor = normalized
+                  ? CATEGORY_COLORS[normalized]
+                  : colors.text.primary;
+                return (
+                  <Text
+                    key={name}
+                    style={[
+                      fontStyle("medium"),
+                      {
+                        fontSize: 14,
+                        color: phaseColor,
+                        letterSpacing: 0.1,
+                      },
+                    ]}
                   >
-                    {phaseTags.map((name, i) => {
-                      const normalized = normalizeCategory(name);
-                      const phaseColor = normalized
-                        ? CATEGORY_COLORS[normalized]
-                        : colors.text.primary;
-                      return (
-                        <Text
-                          key={name}
-                          style={[
-                            fontStyle("medium"),
-                            {
-                              fontSize: 14,
-                              color: phaseColor,
-                              letterSpacing: 0.1,
-                            },
-                          ]}
-                        >
-                          {i > 0 ? "  ·  " : ""}
-                          {name}
-                        </Text>
-                      );
-                    })}
-                  </View>
-                </View>
-              )}
-              {skillTags.length > 0 && (
-                <View>
-                  <MiniLabel>Skill</MiniLabel>
-                  <View
-                    style={{
-                      flexDirection: "row",
-                      flexWrap: "wrap",
-                      gap: spacing.sm,
-                    }}
-                  >
-                    {skillTags.map((name) => {
-                      const normalized = normalizeCategory(name);
-                      const skillColor = normalized
-                        ? CATEGORY_COLORS[normalized]
-                        : undefined;
-                      return (
-                        <ReadOnlyChip
-                          key={name}
-                          label={name}
-                          color={skillColor}
-                        />
-                      );
-                    })}
-                  </View>
-                </View>
-              )}
+                    {i > 0 ? "  ·  " : ""}
+                    {name}
+                  </Text>
+                );
+              })}
             </View>
           )}
         </Section>
 
-        {/* 03 · DESCRIPTION */}
+        {/* 03 · SKILL TAGS */}
         <Section>
-          <NumberedEyebrow index="03" label="Description" />
+          <NumberedEyebrow index="03" label="Skill tags" />
+          {drillSkills.length === 0 ? (
+            <EmptyText style={{ marginTop: spacing.md }}>
+              No skill tags assigned.
+            </EmptyText>
+          ) : (
+            <View style={{ marginTop: spacing.md, gap: spacing.md }}>
+              {SKILL_GROUP_META.map((group) => {
+                const inGroup = drillSkills.filter(
+                  (s) => s.skill_group === group.id
+                );
+                if (inGroup.length === 0) return null;
+                return (
+                  <View key={group.id}>
+                    <MiniLabel>{group.longLabel}</MiniLabel>
+                    <View
+                      style={{
+                        flexDirection: "row",
+                        flexWrap: "wrap",
+                        gap: spacing.sm,
+                      }}
+                    >
+                      {inGroup.map((s) => (
+                        <SkillTagChip
+                          key={s.id}
+                          label={s.skill_name}
+                          color={group.color}
+                          tint={group.tint}
+                          primary={s.weight === 1.0}
+                        />
+                      ))}
+                    </View>
+                  </View>
+                );
+              })}
+            </View>
+          )}
+        </Section>
+
+        {/* 04 · DESCRIPTION */}
+        <Section>
+          <NumberedEyebrow index="04" label="Description" />
           {drill.description?.trim() ? (
             <Text
               style={[
@@ -650,7 +665,7 @@ export default function DrillDetailScreen() {
               justifyContent: "space-between",
             }}
           >
-            <NumberedEyebrow index="04" label="Benchmark" />
+            <NumberedEyebrow index="05" label="Benchmark" />
             {benchmarkCfg ? (
               <View
                 style={{
@@ -683,9 +698,9 @@ export default function DrillDetailScreen() {
           </View>
         </Section>
 
-        {/* 05 · SETUP */}
+        {/* 06 · SETUP */}
         <Section>
-          <NumberedEyebrow index="05" label="Setup" />
+          <NumberedEyebrow index="06" label="Setup" />
           <View style={{ marginTop: spacing.md, gap: spacing.md }}>
             {diagram ? (
               <>
@@ -754,9 +769,9 @@ export default function DrillDetailScreen() {
           </View>
         </Section>
 
-        {/* 06 · COACHING NOTES */}
+        {/* 07 · COACHING NOTES */}
         <Section>
-          <NumberedEyebrow index="06" label="Coaching notes" />
+          <NumberedEyebrow index="07" label="Coaching notes" />
           <View style={{ marginTop: spacing.md, gap: spacing.md }}>
             <View style={{ flexDirection: "row", gap: spacing.md }}>
               <View style={{ flex: 1 }}>
@@ -1146,40 +1161,43 @@ function EmptyText({
   );
 }
 
-function ReadOnlyChip({
+
+// Read-only skill chip. Primary (weight 1.0) gets a filled tint + star;
+// secondary (0.5) gets an outline + hollow star. Mirrors the SkillPicker.
+function SkillTagChip({
   label,
   color,
+  tint,
+  primary,
 }: {
   label: string;
-  color?: string;
+  color: string;
+  tint: string;
+  primary: boolean;
 }) {
-  const accent = color ?? colors.text.primary;
-  const tinted = !!color;
   return (
     <View
       style={{
         flexDirection: "row",
         alignItems: "center",
         gap: 6,
-        paddingHorizontal: 12,
+        paddingHorizontal: 11,
         paddingVertical: 7,
         borderRadius: radius.pill,
-        borderWidth: 1,
-        backgroundColor: tinted
-          ? `${color}26`
-          : colors.surface.elevated,
-        borderColor: tinted ? color : colors.border.card,
+        borderWidth: 1.5,
+        backgroundColor: primary ? tint : "transparent",
+        borderColor: color,
       }}
     >
-      {tinted && <Ionicons name="checkmark" size={12} color={accent} />}
+      <Ionicons
+        name={primary ? "star" : "star-outline"}
+        size={12}
+        color={color}
+      />
       <Text
         style={[
-          fontStyle("medium"),
-          {
-            fontSize: 12.5,
-            color: tinted ? accent : colors.text.primary,
-            letterSpacing: 0.1,
-          },
+          fontStyle(primary ? "bold" : "medium"),
+          { fontSize: 12.5, color, letterSpacing: 0.1 },
         ]}
       >
         {label}

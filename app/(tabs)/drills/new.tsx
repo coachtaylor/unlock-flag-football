@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { DrillForm } from "../../../components/DrillForm";
 import { colors } from "../../../constants/design";
 import { loadDrillCategories } from "../../../lib/load-categories";
+import { loadAllSkills, type Skill } from "../../../lib/skills";
 import { useTeam } from "../../../lib/team-context";
 import type { CategoryType } from "../../../constants/categories";
 
@@ -15,12 +16,16 @@ export default function NewDrillScreen() {
 
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [skills, setSkills] = useState<Skill[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     if (!teamId) return;
     (async () => {
-      const rows = await loadDrillCategories(teamId);
+      const [rows, catalog] = await Promise.all([
+        loadDrillCategories(teamId),
+        loadAllSkills(),
+      ]);
 
       if (cancelled) return;
       setCategories(
@@ -30,6 +35,7 @@ export default function NewDrillScreen() {
           type: c.type,
         }))
       );
+      setSkills(catalog.skills);
       setLoading(false);
     })();
     return () => {
@@ -56,6 +62,7 @@ export default function NewDrillScreen() {
     <DrillForm
       teamId={teamId}
       categories={categories}
+      skills={skills}
       topInset={insets.top}
       bottomInset={insets.bottom + 60}
     />

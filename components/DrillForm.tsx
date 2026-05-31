@@ -1,5 +1,5 @@
 import { useLocalSearchParams } from "expo-router";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -26,6 +26,14 @@ import {
   tintForCategory,
 } from "../constants/categories";
 import { Section } from "./ui/FormSection";
+import { SkillPicker } from "./SkillPicker";
+import { allowedSkillGroupsForPhases } from "../constants/skill-groups";
+import type {
+  DrillSkillLink,
+  DrillSkillWeight,
+  Skill,
+  SkillGroup,
+} from "../lib/skills";
 import DiagramEditor, {
   type DiagramEditorHandle,
   type DiagramSelectionInfo,
@@ -65,6 +73,7 @@ export type DrillFormInitial = {
   id: string;
   drillName: string;
   categoryIds: string[];
+  skills: DrillSkillLink[];
   description: string;
   sourceUrl: string;
   benchmarkConfig: BenchmarkConfig | null;
@@ -79,6 +88,9 @@ export type DrillFormInitial = {
 type Props = {
   teamId: string;
   categories: Category[];
+  // Global skill catalog for the skill-tag picker. Empty array hides the
+  // section gracefully (e.g. if the taxonomy migration hasn't landed).
+  skills: Skill[];
   initial?: DrillFormInitial;
   topInset: number;
   bottomInset: number;
@@ -141,6 +153,7 @@ export function getMonogram(name: string): string {
 export function DrillForm({
   teamId,
   categories,
+  skills,
   initial,
   topInset,
   bottomInset,
@@ -160,14 +173,63 @@ export function DrillForm({
   const isEditing = !!initial;
 
   const [drillName, setDrillName] = useState(initial?.drillName ?? "");
-  const [categoryIds, setCategoryIds] = useState<string[]>(
-    initial?.categoryIds ?? []
-  );
+  // "02 Phase" now holds only phase categories — the old Skill/Sub-skill
+  // category axis was retired in favor of the skill taxonomy (section 03).
+  // Strip any legacy skill/sub-skill links off an edited drill on load; they
+  // get dropped on the next save (Phase tags are kept).
+  const [categoryIds, setCategoryIds] = useState<string[]>(() => {
+    const phaseIds = new Set(
+      categories.filter((c) => typeOf(c) === "phase").map((c) => c.id)
+    );
+    return (initial?.categoryIds ?? []).filter((id) => phaseIds.has(id));
+  });
+
+  // Skill tags: skillId → weight (1.0 primary / 0.5 secondary). Absence = off.
+  const [skillWeights, setSkillWeights] = useState<
+    Map<string, DrillSkillWeight>
+  >(() => {
+    const m = new Map<string, DrillSkillWeight>();
+    for (const s of initial?.skills ?? []) m.set(s.skill_id, s.weight);
+    return m;
+  });
+
+  // skillId → skill_group, for pruning out-of-scope skills on phase change.
+  const skillGroupById = useMemo(() => {
+    const m = new Map<string, SkillGroup>();
+    for (const s of skills) m.set(s.id, s.skill_group);
+    return m;
+  }, [skills]);
+
+  // Which skill groups the picker offers, derived from the chosen phases.
+  const allowedGroupsFor = (ids: string[]): SkillGroup[] =>
+    allowedSkillGroupsForPhases(
+      ids.map((id) => {
+        const cat = categories.find((c) => c.id === id);
+        return cat ? normalizeCategory(cat.name) : null;
+      })
+    );
+  const allowedGroups = allowedGroupsFor(categoryIds);
 
   const toggleCategory = (id: string) => {
-    setCategoryIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
-    );
+    const next = categoryIds.includes(id)
+      ? categoryIds.filter((x) => x !== id)
+      : [...categoryIds, id];
+    setCategoryIds(next);
+    // Prune tagged skills whose group the new phase no longer offers, so a
+    // drill can't keep e.g. Defense skills after switching to Offense-only.
+    const allowed = new Set(allowedGroupsFor(next));
+    setSkillWeights((sw) => {
+      let changed = false;
+      const m = new Map(sw);
+      for (const sid of Array.from(m.keys())) {
+        const g = skillGroupById.get(sid);
+        if (!g || !allowed.has(g)) {
+          m.delete(sid);
+          changed = true;
+        }
+      }
+      return changed ? m : sw;
+    });
   };
   const [description, setDescription] = useState(initial?.description ?? "");
   const [sourceUrl, setSourceUrl] = useState(initial?.sourceUrl ?? "");
@@ -281,14 +343,9 @@ export function DrillForm({
 
   const isCurrentlyPublished = initial?.status === "published";
 
-  // Partition categories by their `category_type`. Phases, Skills, and
-  // Sub-skills get their own chip group; ordering inside each group is
-  // whatever the caller passed in (typically display_order then name).
+  // Only phase categories are managed here now — the Skill/Sub-skill category
+  // axis was retired in favor of the skill taxonomy (section 03).
   const phaseCategories = categories.filter((c) => typeOf(c) === "phase");
-  const skillCategories = categories.filter((c) => typeOf(c) === "skill");
-  const subSkillCategories = categories.filter(
-    (c) => typeOf(c) === "sub_skill"
-  );
 
   // Build the benchmark config once for both completion + submit reads.
   const benchmarkConfig: BenchmarkConfig | null = isBenchmark
@@ -303,11 +360,14 @@ export function DrillForm({
   const benchmarkComplete =
     !isBenchmark || isBenchmarkConfigured(benchmarkConfig);
 
-  // Completion mirrors the 6 numbered sections: identity, tags, description,
-  // benchmark, setup, coaching notes (any of reps/duration/equipment/video).
+  // Completion mirrors the 7 numbered sections: identity, tags, skill tags,
+  // description, benchmark, setup, coaching notes (any of
+  // reps/duration/equipment/video). When the skill catalog is empty the
+  // skill-tags section is hidden, so it doesn't count toward completion.
   const completionSteps = [
     !!drillName.trim(),
     categoryIds.length > 0,
+    ...(skills.length > 0 ? [skillWeights.size > 0] : []),
     !!description.trim(),
     benchmarkComplete,
     hasDiagramCones,
@@ -494,6 +554,38 @@ export function DrillForm({
       if (insertCatErr) {
         Alert.alert("Couldn't save categories", insertCatErr.message);
         return null;
+      }
+    }
+
+    // Skill tags — same delete-then-insert pattern against drill_skills. Only
+    // attempted when the catalog loaded (skills.length > 0); a missing
+    // taxonomy table on an older deploy would otherwise block the save.
+    if (skills.length > 0) {
+      const { error: deleteSkillErr } = await supabase
+        .from("drill_skills")
+        .delete()
+        .eq("drill_id", drillId);
+      if (deleteSkillErr) {
+        Alert.alert("Couldn't save skill tags", deleteSkillErr.message);
+        return null;
+      }
+      // Persist only skills whose group the chosen phase actually offers, so
+      // an out-of-scope tag can never be saved (the guided-flow invariant).
+      const allowed = new Set(allowedGroups);
+      const skillRows = Array.from(skillWeights.entries())
+        .filter(([skill_id]) => {
+          const g = skillGroupById.get(skill_id);
+          return g ? allowed.has(g) : false;
+        })
+        .map(([skill_id, weight]) => ({ drill_id: drillId, skill_id, weight }));
+      if (skillRows.length > 0) {
+        const { error: insertSkillErr } = await supabase
+          .from("drill_skills")
+          .insert(skillRows);
+        if (insertSkillErr) {
+          Alert.alert("Couldn't save skill tags", insertSkillErr.message);
+          return null;
+        }
       }
     }
 
@@ -728,8 +820,8 @@ export function DrillForm({
           </View>
         </Section>
 
-        {/* 02 · TAGS */}
-        {categories.length > 0 ? (
+        {/* 02 · PHASE */}
+        {phaseCategories.length > 0 ? (
           <Section>
             <View
               style={{
@@ -738,7 +830,7 @@ export function DrillForm({
                 alignItems: "center",
               }}
             >
-              <NumberedEyebrow index="02" label="Tags" />
+              <NumberedEyebrow index="02" label="Phase" />
               <View
                 style={{
                   flexDirection: "row",
@@ -767,9 +859,21 @@ export function DrillForm({
 
             {phaseCategories.length > 0 ? (
               <>
-                <MiniGroupLabel style={{ marginTop: spacing.md }}>
-                  Phase
-                </MiniGroupLabel>
+                <Text
+                  style={[
+                    fontStyle("regular"),
+                    {
+                      fontSize: 11.5,
+                      lineHeight: 16,
+                      color: colors.text.muted,
+                      marginTop: spacing.sm,
+                      marginBottom: spacing.sm,
+                    },
+                  ]}
+                >
+                  Where this drill runs in practice. Sets which skill groups you
+                  can tag below.
+                </Text>
                 <View
                   style={{
                     flexDirection: "row",
@@ -833,79 +937,105 @@ export function DrillForm({
               </>
             ) : null}
 
-            {skillCategories.length > 0 ? (
-              <>
-                <MiniGroupLabel style={{ marginTop: spacing.md }}>
-                  Skill
-                </MiniGroupLabel>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    flexWrap: "wrap",
-                    gap: spacing.sm,
-                  }}
-                >
-                  {skillCategories.map((c) => {
-                    const normalized = normalizeCategory(c.name);
-                    const skillColor =
-                      (normalized ? CATEGORY_COLORS[normalized] : undefined) ??
-                      colors.text.muted;
-                    const skillTint = tintForCategory(c.name);
-                    const selected = categoryIds.includes(c.id);
-                    return (
-                      <CategoryChip
-                        key={c.id}
-                        label={c.name}
-                        color={skillColor}
-                        tint={skillTint}
-                        selected={selected}
-                        onPress={() => toggleCategory(c.id)}
-                      />
-                    );
-                  })}
-                </View>
-              </>
-            ) : null}
-
-            {subSkillCategories.length > 0 ? (
-              <>
-                <MiniGroupLabel style={{ marginTop: spacing.md }}>
-                  Sub-skill
-                </MiniGroupLabel>
-                <View
-                  style={{
-                    flexDirection: "row",
-                    flexWrap: "wrap",
-                    gap: spacing.sm,
-                  }}
-                >
-                  {subSkillCategories.map((c) => {
-                    const normalized = normalizeCategory(c.name);
-                    const skillColor =
-                      (normalized ? CATEGORY_COLORS[normalized] : undefined) ??
-                      colors.text.muted;
-                    const skillTint = tintForCategory(c.name);
-                    const selected = categoryIds.includes(c.id);
-                    return (
-                      <CategoryChip
-                        key={c.id}
-                        label={c.name}
-                        color={skillColor}
-                        tint={skillTint}
-                        selected={selected}
-                        onPress={() => toggleCategory(c.id)}
-                      />
-                    );
-                  })}
-                </View>
-              </>
-            ) : null}
           </Section>
         ) : null}
 
-        {/* 03 · DESCRIPTION */}
+        {/* 03 · SKILL TAGS */}
+        {skills.length > 0 ? (
+          <Section>
+            <View
+              style={{
+                flexDirection: "row",
+                justifyContent: "space-between",
+                alignItems: "center",
+              }}
+            >
+              <NumberedEyebrow index="03" label="Skill tags" />
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                <Text
+                  style={[
+                    monoStyle("bold"),
+                    { fontSize: 11, color: colors.text.primary },
+                  ]}
+                >
+                  {skillWeights.size}
+                </Text>
+                <Text
+                  style={[
+                    fontStyle("medium"),
+                    { fontSize: 11, color: colors.text.muted },
+                  ]}
+                >
+                  selected
+                </Text>
+              </View>
+            </View>
+            <View style={{ marginTop: spacing.md }}>
+              {allowedGroups.length === 0 ? (
+                <View
+                  style={{
+                    borderWidth: 1.5,
+                    borderColor: colors.border.default,
+                    borderStyle: "dashed",
+                    borderRadius: radius.lg,
+                    paddingVertical: spacing.lg,
+                    paddingHorizontal: spacing.md,
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  <Ionicons
+                    name="pricetags-outline"
+                    size={18}
+                    color={colors.text.muted}
+                  />
+                  <Text
+                    style={[
+                      fontStyle("medium"),
+                      {
+                        fontSize: 13,
+                        color: colors.text.secondary,
+                        textAlign: "center",
+                      },
+                    ]}
+                  >
+                    Pick a phase first
+                  </Text>
+                  <Text
+                    style={[
+                      fontStyle("regular"),
+                      {
+                        fontSize: 11.5,
+                        lineHeight: 16,
+                        color: colors.text.muted,
+                        textAlign: "center",
+                      },
+                    ]}
+                  >
+                    The skills you can tag depend on where the drill runs.
+                  </Text>
+                </View>
+              ) : (
+                <SkillPicker
+                  skills={skills}
+                  value={skillWeights}
+                  onChange={setSkillWeights}
+                  groups={allowedGroups}
+                />
+              )}
+            </View>
+          </Section>
+        ) : null}
+
+        {/* 04 · DESCRIPTION */}
         <Section>
-          <NumberedEyebrow index="03" label="Description" />
+          <NumberedEyebrow index="04" label="Description" />
           <View style={{ marginTop: spacing.md }}>
             <TextArea
               label="How to run it"
@@ -917,7 +1047,7 @@ export function DrillForm({
           </View>
         </Section>
 
-        {/* 04 · BENCHMARK */}
+        {/* 05 · BENCHMARK */}
         <Section>
           <View
             style={{
@@ -927,7 +1057,7 @@ export function DrillForm({
               marginBottom: spacing.md,
             }}
           >
-            <NumberedEyebrow index="04" label="Benchmark" />
+            <NumberedEyebrow index="05" label="Benchmark" />
             <Text
               style={[
                 fontStyle("medium"),
@@ -1048,9 +1178,9 @@ export function DrillForm({
           ) : null}
         </Section>
 
-        {/* 05 · SETUP */}
+        {/* 06 · SETUP */}
         <Section>
-          <NumberedEyebrow index="05" label="Setup" />
+          <NumberedEyebrow index="06" label="Setup" />
           <View style={{ marginTop: spacing.md }}>
             {hasDiagramCones && diagramData ? (
               <View style={{ position: "relative" }}>
@@ -1139,9 +1269,9 @@ export function DrillForm({
           </View>
         </Section>
 
-        {/* 06 · COACHING NOTES */}
+        {/* 07 · COACHING NOTES */}
         <Section>
-          <NumberedEyebrow index="06" label="Coaching notes" />
+          <NumberedEyebrow index="07" label="Coaching notes" />
           <View style={{ marginTop: spacing.md, gap: spacing.md }}>
             <View style={{ flexDirection: "row", gap: spacing.md }}>
               <View style={{ flex: 1 }}>
@@ -1446,31 +1576,6 @@ export function NumberedEyebrow({
   );
 }
 
-function MiniGroupLabel({
-  children,
-  style,
-}: {
-  children: string;
-  style?: { marginTop?: number };
-}) {
-  return (
-    <Text
-      style={[
-        fontStyle("medium"),
-        {
-          fontSize: 10,
-          color: colors.text.muted,
-          textTransform: "uppercase",
-          letterSpacing: 1.4,
-          marginBottom: spacing.sm,
-        },
-        style,
-      ]}
-    >
-      {children}
-    </Text>
-  );
-}
 
 function CompletionRing({ total, done }: { total: number; done: number }) {
   const size = 44;
@@ -1612,54 +1717,6 @@ export function PhaseChip({
   );
 }
 
-function CategoryChip({
-  label,
-  color,
-  tint,
-  selected,
-  onPress,
-}: {
-  label: string;
-  color: string;
-  tint: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityState={{ selected }}
-      activeOpacity={0.85}
-      hitSlop={6}
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 6,
-        paddingHorizontal: 12,
-        paddingVertical: 7,
-        borderRadius: radius.pill,
-        backgroundColor: selected ? tint : "transparent",
-      }}
-    >
-      {selected ? (
-        <Ionicons name="checkmark" size={12} color={color} />
-      ) : null}
-      <Text
-        style={[
-          fontStyle("medium"),
-          {
-            fontSize: 12.5,
-            color: selected ? color : colors.text.primary,
-            letterSpacing: 0.1,
-          },
-        ]}
-      >
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
-}
 
 function Segmented<T extends string>({
   value,

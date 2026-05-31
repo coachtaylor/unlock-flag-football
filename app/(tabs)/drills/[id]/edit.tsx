@@ -10,6 +10,11 @@ import {
 import { colors, spacing } from "../../../../constants/design";
 import { supabase } from "../../../../lib/supabase";
 import { loadDrillCategories } from "../../../../lib/load-categories";
+import {
+  loadAllSkills,
+  loadDrillSkills,
+  type Skill,
+} from "../../../../lib/skills";
 import { useTeam } from "../../../../lib/team-context";
 import type { DiagramData } from "../../../../types/diagram";
 import type { CategoryType } from "../../../../constants/categories";
@@ -27,6 +32,7 @@ export default function EditDrillScreen() {
 
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [skills, setSkills] = useState<Skill[]>([]);
   const [initial, setInitial] = useState<DrillFormInitial | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -71,9 +77,16 @@ export default function EditDrillScreen() {
           .maybeSingle();
       }
 
-      const categoryRowsRaw = await loadDrillCategories(teamId);
+      const [categoryRowsRaw, catalog, drillSkillsByDrill] = await Promise.all([
+        loadDrillCategories(teamId),
+        loadAllSkills(),
+        loadDrillSkills([id]),
+      ]);
 
       if (cancelled) return;
+
+      setSkills(catalog.skills);
+      const taggedSkills = drillSkillsByDrill[id] ?? [];
 
       // Surface query errors so the page doesn't silently spin if the
       // schema is out of date (e.g. migration not yet applied).
@@ -125,6 +138,10 @@ export default function EditDrillScreen() {
           id: d.id as string,
           drillName: (d.drill_name as string) ?? "",
           categoryIds: links.map((l) => l.category_id),
+          skills: taggedSkills.map((t) => ({
+            skill_id: t.id,
+            weight: t.weight,
+          })),
           description: (d.description as string | null) ?? "",
           sourceUrl: (d.source_url as string | null) ?? "",
           benchmarkConfig: fromStored ?? fromLegacy,
@@ -201,6 +218,7 @@ export default function EditDrillScreen() {
     <DrillForm
       teamId={teamId}
       categories={categories}
+      skills={skills}
       initial={initial}
       topInset={insets.top}
       bottomInset={insets.bottom + 60}

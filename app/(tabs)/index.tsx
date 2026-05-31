@@ -1920,9 +1920,12 @@ function ActivityFeed({
   }
   return (
     <CardShell pad={spacing.md}>
-      {activity.map((row) => (
+      {activity.map((row, i) => (
         <ActivityRow
-          key={`${row.kind}-${row.created_at}-${row.title}`}
+          // Multi-type benchmark logs insert several rows with an identical
+          // created_at, so kind+created_at+title can collide. The feed is
+          // render-only, so the array index disambiguates safely.
+          key={`${row.kind}-${row.created_at}-${row.title}-${i}`}
           time={relativeDayLabel(row.created_at)}
           icon={activityIcon(row.kind)}
           title={row.title}
