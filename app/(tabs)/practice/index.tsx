@@ -1654,26 +1654,6 @@ export default function PracticeListScreen() {
           />
         )}
 
-        {groups.needsAttention.length > 0 && (
-          <>
-            <GroupHeader
-              label="Needs Attention!"
-              count={groups.needsAttention.length}
-              color={colors.red.semantic}
-            />
-            <View style={{ paddingHorizontal: PADH, gap: 10 }}>
-              {groups.needsAttention.map((p) => (
-                <PlanCard
-                  key={p.id}
-                  plan={p}
-                  pastDue
-                  onPress={() => goToPlan(p.id)}
-                />
-              ))}
-            </View>
-          </>
-        )}
-
         {groups.live.map((p) => (
           <LiveRibbon
             key={p.id}
@@ -1718,6 +1698,26 @@ export default function PracticeListScreen() {
             <View style={{ paddingHorizontal: PADH, gap: 10 }}>
               {groups.restWeek.map((p) => (
                 <PlanCard key={p.id} plan={p} onPress={() => goToPlan(p.id)} />
+              ))}
+            </View>
+          </>
+        )}
+
+        {groups.needsAttention.length > 0 && (
+          <>
+            <GroupHeader
+              label="Needs Attention!"
+              count={groups.needsAttention.length}
+              color={colors.red.semantic}
+            />
+            <View style={{ paddingHorizontal: PADH, gap: 10 }}>
+              {groups.needsAttention.map((p) => (
+                <PlanCard
+                  key={p.id}
+                  plan={p}
+                  pastDue
+                  onPress={() => goToPlan(p.id)}
+                />
               ))}
             </View>
           </>
