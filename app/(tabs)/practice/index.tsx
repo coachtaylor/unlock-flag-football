@@ -673,6 +673,41 @@ function LiveRibbon({
             }}
           />
         </View>
+        {/* Explicit way back to the prep page (attendance + plan review).
+            The green LIVE pill jumps into the run timer instead. */}
+        <TouchableOpacity
+          accessibilityRole="link"
+          accessibilityLabel="Review setup"
+          activeOpacity={0.7}
+          onPress={onPress}
+          hitSlop={6}
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 5,
+            marginTop: 12,
+            alignSelf: "flex-start",
+          }}
+        >
+          <Ionicons
+            name="clipboard-outline"
+            size={13}
+            color={colors.text.secondary}
+          />
+          <Text
+            style={[
+              fontStyle("semibold"),
+              { fontSize: 12, color: colors.text.secondary },
+            ]}
+          >
+            Review Setup
+          </Text>
+          <Ionicons
+            name="chevron-forward"
+            size={11}
+            color={colors.text.muted}
+          />
+        </TouchableOpacity>
       </TouchableOpacity>
     </View>
   );
