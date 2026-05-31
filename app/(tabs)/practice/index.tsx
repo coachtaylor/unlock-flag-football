@@ -13,7 +13,6 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import Svg, { Rect, Path } from "react-native-svg";
 import { useFocusEffect, useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -320,18 +319,26 @@ function DateTile({
   const { mon, day, dow } = dateParts(iso);
   const isToday = dayOffset === 0;
   const isPast = dayOffset != null && dayOffset < 0;
+  // Accent (today / past-due) is carried by a 1.5px ring + tinted fill +
+  // colored numerals — NOT a solid fill — so the tile never competes with
+  // the card's orange CTA.
+  const accent = pastDue
+    ? colors.red.semantic
+    : isToday
+    ? colors.orange[500]
+    : null;
   return (
     <View
       style={{
         width: size,
         height: size,
         borderRadius: radius.lg,
-        backgroundColor: isToday ? colors.orange[500] : colors.surface.overlay,
-        borderWidth: isToday ? 0 : 1,
-        borderColor: pastDue ? `${colors.red.semantic}55` : colors.border.strong,
+        backgroundColor: accent ? `${accent}1A` : colors.surface.overlay,
+        borderWidth: accent ? 1.5 : 1,
+        borderColor: accent ? `${accent}80` : colors.border.strong,
         alignItems: "center",
         justifyContent: "center",
-        opacity: pastDue ? 1 : isPast ? 0.62 : 1,
+        opacity: !accent && isPast ? 0.62 : 1,
       }}
     >
       <MonoText
@@ -340,11 +347,7 @@ function DateTile({
           fontSize: 9,
           letterSpacing: 1,
           textTransform: "uppercase",
-          color: pastDue
-            ? colors.red.semantic
-            : isToday
-            ? "rgba(10,10,13,0.7)"
-            : colors.text.secondary,
+          color: accent ?? colors.text.secondary,
         }}
       >
         {mon}
@@ -354,11 +357,7 @@ function DateTile({
         style={{
           fontSize: size >= 64 ? 24 : 20,
           lineHeight: size >= 64 ? 27 : 23,
-          color: pastDue
-            ? colors.red.semantic
-            : isToday
-            ? colors.text.onBrand
-            : colors.text.primary,
+          color: accent ?? colors.text.primary,
         }}
       >
         {day}
@@ -369,11 +368,7 @@ function DateTile({
           fontSize: 9,
           letterSpacing: 1,
           textTransform: "uppercase",
-          color: pastDue
-            ? colors.red.semantic
-            : isToday
-            ? "rgba(10,10,13,0.55)"
-            : colors.text.muted,
+          color: accent ? `${accent}B0` : colors.text.muted,
         }}
       >
         {dow}
@@ -686,7 +681,7 @@ function LiveRibbon({
               gap: 8,
             }}
           >
-            {onManage ? <CardManageButton plan={plan} onPress={onManage} /> : null}
+            {onManage ? <CardManageButton onPress={onManage} /> : null}
             <TouchableOpacity
               accessibilityLabel="Send back to scheduled"
               hitSlop={8}
@@ -831,74 +826,23 @@ function MetaRow({ plan }: { plan: PlanVM }) {
   );
 }
 
-// ── duplicate icon ──────────────────────────────────────────────────
-// Two equal rounded squares, offset diagonally; a plus in the front one.
-
-function DuplicateIcon({
-  size = 22,
-  color,
-  maskColor = colors.surface.raised,
-}: {
-  size?: number;
-  color: string;
-  maskColor?: string;
-}) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      {/* back square — offset to the upper-right */}
-      <Rect
-        x={7.75}
-        y={3.25}
-        width={13}
-        height={13}
-        rx={3.5}
-        stroke={color}
-        strokeWidth={1.8}
-      />
-      {/* front square — lower-left, filled so it cleanly masks the overlap */}
-      <Rect
-        x={3.25}
-        y={7.75}
-        width={13}
-        height={13}
-        rx={3.5}
-        fill={maskColor}
-        stroke={color}
-        strokeWidth={1.8}
-      />
-      {/* plus, centered in the front square */}
-      <Path
-        d="M9.75 10.9v6.7 M6.4 14.25h6.7"
-        stroke={color}
-        strokeWidth={1.8}
-        strokeLinecap="round"
-      />
-    </Svg>
-  );
-}
-
 // ── hero card (up next) ─────────────────────────────────────────────
 
 function HeroCard({
   plan,
   starting,
-  duplicating,
   onOpen,
   onStart,
   onEdit,
-  onDuplicate,
   onManage,
 }: {
   plan: PlanVM;
   starting: boolean;
-  duplicating: boolean;
   onOpen: () => void;
   onStart: () => void;
   onEdit: () => void;
-  onDuplicate: () => void;
   onManage?: () => void;
 }) {
-  const totalMix = plan.mix.reduce((s, m) => s + m.minutes, 0);
   return (
     <View style={{ paddingHorizontal: PADH }}>
       <View
@@ -937,41 +881,15 @@ function HeroCard({
               <MetaRow plan={plan} />
             </View>
           </TouchableOpacity>
-          <TouchableOpacity
-            activeOpacity={0.7}
-            onPress={onDuplicate}
-            disabled={duplicating}
-            hitSlop={8}
-            accessibilityLabel="Duplicate practice"
-            style={{
-              width: 38,
-              height: 38,
-              alignItems: "center",
-              justifyContent: "center",
-              borderRadius: radius.md,
-              opacity: duplicating ? 0.4 : 1,
-            }}
-          >
-            <DuplicateIcon size={24} color={colors.text.secondary} />
-          </TouchableOpacity>
-          {onManage ? <CardManageButton plan={plan} onPress={onManage} /> : null}
+          {onManage ? <CardManageButton onPress={onManage} /> : null}
         </View>
 
         <TouchableOpacity activeOpacity={0.85} onPress={onOpen}>
-          {/* Drill mix */}
-          <View style={{ marginTop: 14 }}>
-            <View
-              style={{
-                flexDirection: "row",
-                justifyContent: "space-between",
-                marginBottom: 6,
-              }}
-            >
-              <Eyebrow variant="dim">Mix</Eyebrow>
-              <MonoText style={{ fontSize: 10, color: colors.text.muted }}>
-                {fmtDur(totalMix)} planned
-              </MonoText>
-            </View>
+          {/* Drill mix — duration already shown in the meta row above, so the
+              header is just the label (no redundant total). */}
+          <View style={{ marginTop: 16 }}>
+            <Eyebrow variant="dim">Mix</Eyebrow>
+            <View style={{ height: 6 }} />
             <MixBar mix={plan.mix} height={6} />
             <View
               style={{
@@ -1089,47 +1007,17 @@ function PastDueBadge() {
   );
 }
 
-// ── card manage button (delete / archive / unarchive) ──────────────
-// The icon reflects the lifecycle action available for this plan:
-//   draft/scheduled → trash (delete)   live/completed → archive
-//   archived        → unarchive
-function manageActionIcon(plan: PlanVM): {
-  name: keyof typeof Ionicons.glyphMap;
-  color: string;
-  label: string;
-} {
-  if (plan.archived)
-    return {
-      name: "arrow-undo-outline",
-      color: colors.text.secondary,
-      label: "Unarchive practice",
-    };
-  if (plan.status === "draft" || plan.status === "scheduled")
-    return {
-      name: "trash-outline",
-      color: colors.red.semantic,
-      label: "Delete practice",
-    };
-  return {
-    name: "archive-outline",
-    color: colors.text.secondary,
-    label: "Archive practice",
-  };
-}
-
-function CardManageButton({
-  plan,
-  onPress,
-}: {
-  plan: PlanVM;
-  onPress: () => void;
-}) {
-  const icon = manageActionIcon(plan);
+// ── card manage button ─────────────────────────────────────────────
+// A single neutral overflow control. Tapping opens an action sheet with
+// the lifecycle action(s) available for this plan (delete/archive/
+// unarchive, plus duplicate on the hero). Kept quiet so it never competes
+// with the card's content or the destructive-red Past Due signal.
+function CardManageButton({ onPress }: { onPress: () => void }) {
   return (
     <TouchableOpacity
-      activeOpacity={0.7}
-      hitSlop={8}
-      accessibilityLabel={icon.label}
+      activeOpacity={0.6}
+      hitSlop={10}
+      accessibilityLabel="Manage practice"
       onPress={(e) => {
         e.stopPropagation();
         onPress();
@@ -1142,7 +1030,11 @@ function CardManageButton({
         justifyContent: "center",
       }}
     >
-      <Ionicons name={icon.name} size={17} color={icon.color} />
+      <Ionicons
+        name="ellipsis-horizontal"
+        size={18}
+        color={colors.text.muted}
+      />
     </TouchableOpacity>
   );
 }
@@ -1208,7 +1100,7 @@ function PlanCard({
             <MetaRow plan={plan} />
           </View>
           {pastDue ? <PastDueBadge /> : <StatusPill status={plan.status} mini />}
-          {onManage ? <CardManageButton plan={plan} onPress={onManage} /> : null}
+          {onManage ? <CardManageButton onPress={onManage} /> : null}
         </View>
 
         {plan.drills > 0 ? (
@@ -1518,64 +1410,55 @@ export default function PracticeListScreen() {
     );
   };
 
-  // Manage a plan straight from its list card. Delete vs archive follows the
-  // lifecycle policy: draft/scheduled can be deleted outright; live/completed
-  // can only be archived; archived plans can be unarchived.
-  const managePlan = (plan: PlanVM) => {
+  // Run a lifecycle mutation (delete / archive / unarchive) then reload.
+  const doManage = async (
+    plan: PlanVM,
+    patch: object | null,
+    label: string
+  ) => {
+    const q = supabase.from("practice_plans");
+    const { error } = patch
+      ? await q.update(patch).eq("id", plan.id)
+      : await q.delete().eq("id", plan.id);
+    if (error) {
+      Alert.alert(`Couldn't ${label} practice`, error.message);
+      return;
+    }
+    await load();
+  };
+
+  // Single overflow menu for a card. Delete vs archive follows the lifecycle
+  // policy: draft/scheduled delete outright; live/completed archive only;
+  // archived unarchive. `duplicate` adds a Duplicate option (used by the
+  // hero, which folds its old duplicate icon into this menu).
+  const openPlanMenu = (plan: PlanVM, opts?: { duplicate?: boolean }) => {
     lightHaptic();
-    const reloadOr = (label: string) => async (patch: object | null) => {
-      const q = supabase.from("practice_plans");
-      const { error } = patch
-        ? await q.update(patch).eq("id", plan.id)
-        : await q.delete().eq("id", plan.id);
-      if (error) {
-        Alert.alert(`Couldn't ${label} practice`, error.message);
-        return;
-      }
-      await load();
-    };
+    const buttons: Parameters<typeof Alert.alert>[2] = [];
+    if (opts?.duplicate) {
+      buttons!.push({ text: "Duplicate", onPress: () => duplicatePlan(plan.id) });
+    }
+    let warn: string | undefined;
     if (plan.archived) {
-      Alert.alert(
-        "Unarchive practice?",
-        "It returns to your active practice lists.",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Unarchive",
-            onPress: () => reloadOr("unarchive")({ archived_at: null }),
-          },
-        ]
-      );
-      return;
+      buttons!.push({
+        text: "Unarchive",
+        onPress: () => doManage(plan, { archived_at: null }, "unarchive"),
+      });
+    } else if (plan.status === "draft" || plan.status === "scheduled") {
+      warn = "Deleting removes the plan and its schedule. This can't be undone.";
+      buttons!.push({
+        text: "Delete",
+        style: "destructive",
+        onPress: () => doManage(plan, null, "delete"),
+      });
+    } else {
+      buttons!.push({
+        text: "Archive",
+        onPress: () =>
+          doManage(plan, { archived_at: new Date().toISOString() }, "archive"),
+      });
     }
-    if (plan.status === "draft" || plan.status === "scheduled") {
-      Alert.alert(
-        "Delete practice?",
-        "This permanently removes the plan and its schedule. This can't be undone.",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Delete",
-            style: "destructive",
-            onPress: () => reloadOr("delete")(null),
-          },
-        ]
-      );
-      return;
-    }
-    // live / completed → archive only
-    Alert.alert(
-      "Archive practice?",
-      "It moves to your Archived list and out of the active views. You can unarchive it later.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Archive",
-          onPress: () =>
-            reloadOr("archive")({ archived_at: new Date().toISOString() }),
-        },
-      ]
-    );
+    buttons!.push({ text: "Cancel", style: "cancel" });
+    Alert.alert(plan.title ?? "Practice", warn, buttons);
   };
 
   // Duplicate a plan into a fresh independent draft, then open it for editing.
@@ -1838,7 +1721,7 @@ export default function PracticeListScreen() {
             onPress={() => goToPlan(p.id)}
             onLive={() => router.push(`/practice/${p.id}/run` as never)}
             onSendToScheduled={() => sendLiveToScheduled(p.id)}
-            onManage={() => managePlan(p)}
+            onManage={() => openPlanMenu(p)}
             busy={startingId === p.id}
           />
         ))}
@@ -1861,12 +1744,10 @@ export default function PracticeListScreen() {
               <HeroCard
                 plan={groups.nextUp}
                 starting={startingId === groups.nextUp.id}
-                duplicating={duplicating}
                 onOpen={() => goToPlan(groups.nextUp!.id)}
                 onStart={() => goToPlan(groups.nextUp!.id)}
                 onEdit={() => goToEdit(groups.nextUp!.id)}
-                onDuplicate={() => duplicatePlan(groups.nextUp!.id)}
-                onManage={() => managePlan(groups.nextUp!)}
+                onManage={() => openPlanMenu(groups.nextUp!, { duplicate: true })}
               />
             )}
           </>
@@ -1889,7 +1770,7 @@ export default function PracticeListScreen() {
                   key={p.id}
                   plan={p}
                   onPress={() => goToPlan(p.id)}
-                  onManage={() => managePlan(p)}
+                  onManage={() => openPlanMenu(p)}
                 />
                 ))}
               </View>
@@ -1914,7 +1795,7 @@ export default function PracticeListScreen() {
                     key={p.id}
                     plan={p}
                     pastDue
-                    onManage={() => managePlan(p)}
+                    onManage={() => openPlanMenu(p)}
                     onPress={() =>
                       router.push(
                         (p.status === "live"
@@ -1946,7 +1827,7 @@ export default function PracticeListScreen() {
                   key={p.id}
                   plan={p}
                   onPress={() => goToPlan(p.id)}
-                  onManage={() => managePlan(p)}
+                  onManage={() => openPlanMenu(p)}
                 />
                 ))}
               </View>
@@ -1971,7 +1852,7 @@ export default function PracticeListScreen() {
                   key={p.id}
                   plan={p}
                   onPress={() => goToPlan(p.id)}
-                  onManage={() => managePlan(p)}
+                  onManage={() => openPlanMenu(p)}
                 />
                 ))}
               </View>
@@ -1996,7 +1877,7 @@ export default function PracticeListScreen() {
                   key={p.id}
                   plan={p}
                   onPress={() => goToPlan(p.id)}
-                  onManage={() => managePlan(p)}
+                  onManage={() => openPlanMenu(p)}
                 />
                 ))}
               </View>
