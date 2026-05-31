@@ -24,9 +24,14 @@ import {
   colorForCategory,
   inferCategoryType,
   normalizeCategory,
-  tintForCategory,
 } from "../../../constants/categories";
+import {
+  SKILL_GROUP_META,
+  skillGroupMeta,
+  type SkillGroup,
+} from "../../../constants/skill-groups";
 import { supabase } from "../../../lib/supabase";
+import { loadDrillSkills } from "../../../lib/skills";
 import { loadDrillCategories } from "../../../lib/load-categories";
 import { useTeam } from "../../../lib/team-context";
 import { useAuth } from "../../../lib/auth-context";
@@ -61,6 +66,10 @@ type Drill = {
   benchmarkTypes: BenchmarkKind[];
   categoryIds: string[];
   categoryNames: string[];
+  // Skill groups the drill develops (from the skill taxonomy), in canonical
+  // radar order. Powers the skill-group filter + row chips. Replaces the
+  // retired skill-category pills.
+  skillGroups: SkillGroup[];
   durationMin: number | null;
   reps: number | null;
   createdAt: string;
@@ -327,11 +336,9 @@ function DrillRow({
   // section the row belongs to. Skill / sub-skill pills still render inside
   // the card. Drills with no phase tagged fall back to violet (a hue we
   // don't use elsewhere) so "no phase yet" reads as its own distinct state.
-  const allLinked = drill.categoryIds
+  const phase = drill.categoryIds
     .map((id) => byId.get(id))
-    .filter((c): c is Category => !!c);
-  const phase = allLinked.find((c) => c.type === "phase");
-  const linked = allLinked.filter((c) => c.type !== "phase");
+    .find((c): c is Category => !!c && c.type === "phase");
   const accentColor = phase?.color ?? colors.team.violet;
 
   return (
@@ -451,10 +458,10 @@ function DrillRow({
                 )}
               </View>
 
-              {/* Skills row — every linked skill / sub-skill renders as a
-                  filled tinted pill. Wraps to the next line when there are
-                  enough to push the right-hand columns. */}
-              {linked.length > 0 && (
+              {/* Skill groups — the taxonomy axis. Each renders as a filled
+                  tinted pill colored by its group. Wraps to the next line
+                  when there are enough to push the right-hand columns. */}
+              {drill.skillGroups.length > 0 && (
                 <View
                   style={{
                     flexDirection: "row",
@@ -463,31 +470,34 @@ function DrillRow({
                     gap: 5,
                   }}
                 >
-                  {linked.map((c) => (
-                    <View
-                      key={c.id}
-                      style={{
-                        paddingHorizontal: 7,
-                        paddingVertical: 2,
-                        borderRadius: 4,
-                        backgroundColor: tintForCategory(c.name),
-                      }}
-                    >
-                      <Text
-                        style={[
-                          fontStyle("bold"),
-                          {
-                            fontSize: 9.5,
-                            letterSpacing: 0.6,
-                            textTransform: "uppercase",
-                            color: c.color,
-                          },
-                        ]}
+                  {drill.skillGroups.map((g) => {
+                    const meta = skillGroupMeta(g);
+                    return (
+                      <View
+                        key={g}
+                        style={{
+                          paddingHorizontal: 7,
+                          paddingVertical: 2,
+                          borderRadius: 4,
+                          backgroundColor: meta.tint,
+                        }}
                       >
-                        {c.name}
-                      </Text>
-                    </View>
-                  ))}
+                        <Text
+                          style={[
+                            fontStyle("bold"),
+                            {
+                              fontSize: 9.5,
+                              letterSpacing: 0.6,
+                              textTransform: "uppercase",
+                              color: meta.color,
+                            },
+                          ]}
+                        >
+                          {meta.label}
+                        </Text>
+                      </View>
+                    );
+                  })}
                 </View>
               )}
             </View>
@@ -620,7 +630,9 @@ export default function DrillListScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
   const [drills, setDrills] = useState<Drill[]>([]);
-  const [activeSkill, setActiveSkill] = useState<string>(ALL);
+  const [activeSkillGroup, setActiveSkillGroup] = useState<
+    SkillGroup | typeof ALL
+  >(ALL);
   const [activeStatus, setActiveStatus] = useState<StatusFilter>("all");
   const [activeBenchmark, setActiveBenchmark] = useState<BenchmarkFilter>("all");
   const [sortBy, setSortBy] = useState<SortOption>("name_asc");
@@ -667,6 +679,13 @@ export default function DrillListScreen() {
     }));
     const byId = new Map(categoryRows.map((c) => [c.id, c]));
 
+    // Skill taxonomy links for the visible drills — drives the skill-group
+    // filter + row chips. One extra round-trip; the catalog is small.
+    const visibleIds = (drillsRes.data ?? [])
+      .filter((d) => d.status === "published" || d.created_by === userId)
+      .map((d) => d.id as string);
+    const skillsByDrill = await loadDrillSkills(visibleIds);
+
     const drillRows: Drill[] = (drillsRes.data ?? [])
       .filter((d) => {
         if (d.status === "published") return true;
@@ -680,6 +699,10 @@ export default function DrillListScreen() {
         const names = ids
           .map((id) => byId.get(id)?.name)
           .filter((n): n is string => !!n);
+        const tagged = skillsByDrill[d.id as string] ?? [];
+        const skillGroups: SkillGroup[] = SKILL_GROUP_META.filter((m) =>
+          tagged.some((t) => t.skill_group === m.id)
+        ).map((m) => m.id);
         return {
           id: d.id as string,
           name: d.drill_name as string,
@@ -691,6 +714,7 @@ export default function DrillListScreen() {
               : []),
           categoryIds: ids,
           categoryNames: names,
+          skillGroups,
           durationMin:
             typeof d.default_duration_min === "number"
               ? (d.default_duration_min as number)
@@ -735,10 +759,6 @@ export default function DrillListScreen() {
     [categories]
   );
 
-  const skills = useMemo(
-    () => categories.filter((c) => c.type === "skill"),
-    [categories]
-  );
   const phases = useMemo(
     () => categories.filter((c) => c.type === "phase"),
     [categories]
@@ -750,16 +770,14 @@ export default function DrillListScreen() {
   );
   const draftCount = drills.length - publishedDrills.length;
 
-  const countsBySkillId = useMemo(() => {
-    const map: Record<string, number> = {};
-    for (const s of skills) map[s.id] = 0;
+  const countsBySkillGroup = useMemo(() => {
+    const map = {} as Record<SkillGroup, number>;
+    for (const m of SKILL_GROUP_META) map[m.id] = 0;
     for (const d of publishedDrills) {
-      for (const id of d.categoryIds) {
-        if (id in map) map[id]++;
-      }
+      for (const g of d.skillGroups) map[g] = (map[g] ?? 0) + 1;
     }
     return map;
-  }, [publishedDrills, skills]);
+  }, [publishedDrills]);
 
   const phaseCounts = useMemo(() => {
     const map: Record<string, number> = {};
@@ -777,7 +795,7 @@ export default function DrillListScreen() {
     const q = search.trim().toLowerCase();
     const matched = drills.filter((d) => {
       const skillMatch =
-        activeSkill === ALL || d.categoryIds.includes(activeSkill);
+        activeSkillGroup === ALL || d.skillGroups.includes(activeSkillGroup);
       const searchMatch = q.length === 0 || d.name.toLowerCase().includes(q);
       const statusMatch =
         activeStatus === "all" || d.status === activeStatus;
@@ -793,7 +811,7 @@ export default function DrillListScreen() {
       return [...matched].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     }
     return [...matched].sort((a, b) => a.name.localeCompare(b.name));
-  }, [drills, activeSkill, activeStatus, activeBenchmark, search, sortBy]);
+  }, [drills, activeSkillGroup, activeStatus, activeBenchmark, search, sortBy]);
 
   // Group the filtered drills by their primary phase (first phase-type
   // category linked on each drill). Section order is fixed: Warm Up first,
@@ -872,7 +890,7 @@ export default function DrillListScreen() {
   }, [filtered, phases, byId]);
 
   const activeFilterCount =
-    (activeSkill !== ALL ? 1 : 0) +
+    (activeSkillGroup !== ALL ? 1 : 0) +
     (activeStatus !== "all" ? 1 : 0) +
     (activeBenchmark !== "all" ? 1 : 0);
 
@@ -1182,16 +1200,16 @@ export default function DrillListScreen() {
                       color={p.color}
                     />
                   ))}
-                {skills
-                  .filter((s) => (countsBySkillId[s.id] ?? 0) > 0)
-                  .map((s) => (
-                    <SquadBar
-                      key={s.id}
-                      label={s.name.slice(0, 3).toUpperCase()}
-                      count={countsBySkillId[s.id] ?? 0}
-                      color={s.color}
-                    />
-                  ))}
+                {SKILL_GROUP_META.filter(
+                  (m) => (countsBySkillGroup[m.id] ?? 0) > 0
+                ).map((m) => (
+                  <SquadBar
+                    key={m.id}
+                    label={m.label.slice(0, 3).toUpperCase()}
+                    count={countsBySkillGroup[m.id] ?? 0}
+                    color={m.color}
+                  />
+                ))}
               </View>
             </View>
           </Card>
@@ -1333,15 +1351,14 @@ export default function DrillListScreen() {
       <FilterSheet
         open={filterOpen}
         onClose={() => setFilterOpen(false)}
-        skills={skills}
-        activeSkill={activeSkill}
-        setActiveSkill={setActiveSkill}
+        activeSkillGroup={activeSkillGroup}
+        setActiveSkillGroup={setActiveSkillGroup}
         activeStatus={activeStatus}
         setActiveStatus={setActiveStatus}
         activeBenchmark={activeBenchmark}
         setActiveBenchmark={setActiveBenchmark}
         onClear={() => {
-          setActiveSkill(ALL);
+          setActiveSkillGroup(ALL);
           setActiveStatus("all");
           setActiveBenchmark("all");
         }}
@@ -1492,9 +1509,8 @@ function SheetSectionLabel({ children }: { children: string }) {
 function FilterSheet({
   open,
   onClose,
-  skills,
-  activeSkill,
-  setActiveSkill,
+  activeSkillGroup,
+  setActiveSkillGroup,
   activeStatus,
   setActiveStatus,
   activeBenchmark,
@@ -1503,9 +1519,8 @@ function FilterSheet({
 }: {
   open: boolean;
   onClose: () => void;
-  skills: Category[];
-  activeSkill: string;
-  setActiveSkill: (v: string) => void;
+  activeSkillGroup: SkillGroup | typeof ALL;
+  setActiveSkillGroup: (v: SkillGroup | typeof ALL) => void;
   activeStatus: StatusFilter;
   setActiveStatus: (v: StatusFilter) => void;
   activeBenchmark: BenchmarkFilter;
@@ -1542,22 +1557,22 @@ function FilterSheet({
       </View>
 
       <View style={{ gap: spacing.sm }}>
-        <SheetSectionLabel>Skill</SheetSectionLabel>
+        <SheetSectionLabel>Skill group</SheetSectionLabel>
         <View
           style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm }}
         >
           <PhaseChip
             label="All"
-            selected={activeSkill === ALL}
-            onPress={() => setActiveSkill(ALL)}
+            selected={activeSkillGroup === ALL}
+            onPress={() => setActiveSkillGroup(ALL)}
           />
-          {skills.map((c) => (
+          {SKILL_GROUP_META.map((m) => (
             <PhaseChip
-              key={c.id}
-              label={c.name}
-              color={c.color}
-              selected={activeSkill === c.id}
-              onPress={() => setActiveSkill(c.id)}
+              key={m.id}
+              label={m.label}
+              color={m.color}
+              selected={activeSkillGroup === m.id}
+              onPress={() => setActiveSkillGroup(m.id)}
             />
           ))}
         </View>
