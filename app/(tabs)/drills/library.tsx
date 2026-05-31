@@ -387,63 +387,32 @@ function PresetCard({
         <View style={{ width: 3, backgroundColor: accentColor }} />
 
         <View style={{ flex: 1, padding: spacing.lg, gap: spacing.sm }}>
-          {/* Title + meta + bench badge */}
-          <View
-            style={{
-              flexDirection: "row",
-              alignItems: "flex-start",
-              gap: spacing.sm,
-            }}
-          >
-            <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+          {/* Title + meta. Presets are NOT labeled as benchmarks — benchmark
+              designation is a captain opt-in after cloning (see the clone RPC),
+              so no "Bench" badge here. */}
+          <View style={{ gap: 2 }}>
+            <Text
+              style={[
+                fontStyle("bold"),
+                { fontSize: 15, color: colors.text.primary },
+              ]}
+            >
+              {preset.drill_name}
+            </Text>
+            {metaParts.length > 0 && (
               <Text
                 style={[
-                  fontStyle("bold"),
-                  { fontSize: 15, color: colors.text.primary },
+                  monoStyle("medium"),
+                  {
+                    fontSize: 10,
+                    color: colors.text.muted,
+                    letterSpacing: 0.6,
+                    textTransform: "uppercase",
+                  },
                 ]}
               >
-                {preset.drill_name}
+                {metaParts.join(" · ")}
               </Text>
-              {metaParts.length > 0 && (
-                <Text
-                  style={[
-                    monoStyle("medium"),
-                    {
-                      fontSize: 10,
-                      color: colors.text.muted,
-                      letterSpacing: 0.6,
-                      textTransform: "uppercase",
-                    },
-                  ]}
-                >
-                  {metaParts.join(" · ")}
-                </Text>
-              )}
-            </View>
-            {preset.benchmark_types.length > 0 && (
-              <View
-                accessibilityLabel="Benchmark drill"
-                style={{
-                  paddingHorizontal: 7,
-                  paddingVertical: 2,
-                  borderRadius: 4,
-                  backgroundColor: "rgba(255, 77, 77, 0.14)",
-                }}
-              >
-                <Text
-                  style={[
-                    fontStyle("bold"),
-                    {
-                      fontSize: 9.5,
-                      letterSpacing: 0.6,
-                      textTransform: "uppercase",
-                      color: colors.red.semantic,
-                    },
-                  ]}
-                >
-                  Bench
-                </Text>
-              </View>
             )}
           </View>
 
