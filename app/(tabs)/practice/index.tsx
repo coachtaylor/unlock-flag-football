@@ -852,18 +852,26 @@ function HeroCard({
           >
             <DateTile iso={plan.practiceDate} dayOffset={plan.dayOffset} size={64} />
             <View style={{ flex: 1, gap: 8, minWidth: 0 }}>
-              <View style={{ flexDirection: "row" }}>
+              {/* Title first; badge rides on the same row, vertically centered. */}
+              <View
+                style={{ flexDirection: "row", alignItems: "center", gap: 10 }}
+              >
+                <Text
+                  style={[
+                    fontStyle("semibold"),
+                    {
+                      flexShrink: 1,
+                      fontSize: 18,
+                      lineHeight: 23,
+                      color: colors.text.primary,
+                    },
+                  ]}
+                  numberOfLines={2}
+                >
+                  {plan.title || "Untitled practice"}
+                </Text>
                 <StatusPill status={plan.status} />
               </View>
-              <Text
-                style={[
-                  fontStyle("semibold"),
-                  { fontSize: 18, lineHeight: 23, color: colors.text.primary },
-                ]}
-                numberOfLines={2}
-              >
-                {plan.title || "Untitled practice"}
-              </Text>
               <MetaRow plan={plan} />
             </View>
           </TouchableOpacity>
@@ -1062,33 +1070,29 @@ function PlanCard({
         pastDue={pastDue}
       />
       <View style={{ flex: 1, gap: 12, minWidth: 0 }}>
-        {/* Top row: status badge (left) · manage (right), kept apart */}
-        <View
-          style={{
-            flexDirection: "row",
-            justifyContent: "space-between",
-            alignItems: "center",
-            minHeight: 18,
-          }}
-        >
-          {pastDue ? <PastDueBadge /> : <StatusPill status={plan.status} />}
-          {onManage ? <CardManageButton onPress={onManage} /> : null}
-        </View>
-
-        {/* Title + meta */}
+        {/* Title first; badge rides on the same row (centered), with the
+            ••• pushed to the far right so it stays clear of the badge. */}
         <View style={{ gap: 4, minWidth: 0 }}>
-          <Text
-            style={[
-              fontStyle("semibold"),
-              {
-                fontSize: 15,
-                color: plan.title ? colors.text.primary : colors.text.muted,
-              },
-            ]}
-            numberOfLines={1}
+          <View
+            style={{ flexDirection: "row", alignItems: "center", gap: 8 }}
           >
-            {plan.title || "Untitled plan"}
-          </Text>
+            <Text
+              style={[
+                fontStyle("semibold"),
+                {
+                  flexShrink: 1,
+                  fontSize: 15,
+                  color: plan.title ? colors.text.primary : colors.text.muted,
+                },
+              ]}
+              numberOfLines={1}
+            >
+              {plan.title || "Untitled plan"}
+            </Text>
+            {pastDue ? <PastDueBadge /> : <StatusPill status={plan.status} />}
+            <View style={{ flex: 1 }} />
+            {onManage ? <CardManageButton onPress={onManage} /> : null}
+          </View>
           <MetaRow plan={plan} />
         </View>
 
