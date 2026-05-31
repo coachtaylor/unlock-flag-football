@@ -629,12 +629,14 @@ function LiveRibbon({
   onPress,
   onLive,
   onSendToScheduled,
+  onManage,
   busy,
 }: {
   plan: PlanVM;
   onPress: () => void;
   onLive: () => void;
   onSendToScheduled: () => void;
+  onManage?: () => void;
   busy: boolean;
 }) {
   const progress = plan.progressMin ?? 0;
@@ -684,6 +686,7 @@ function LiveRibbon({
               gap: 8,
             }}
           >
+            {onManage ? <CardManageButton plan={plan} onPress={onManage} /> : null}
             <TouchableOpacity
               accessibilityLabel="Send back to scheduled"
               hitSlop={8}
@@ -884,6 +887,7 @@ function HeroCard({
   onStart,
   onEdit,
   onDuplicate,
+  onManage,
 }: {
   plan: PlanVM;
   starting: boolean;
@@ -892,6 +896,7 @@ function HeroCard({
   onStart: () => void;
   onEdit: () => void;
   onDuplicate: () => void;
+  onManage?: () => void;
 }) {
   const totalMix = plan.mix.reduce((s, m) => s + m.minutes, 0);
   return (
@@ -949,6 +954,7 @@ function HeroCard({
           >
             <DuplicateIcon size={24} color={colors.text.secondary} />
           </TouchableOpacity>
+          {onManage ? <CardManageButton plan={plan} onPress={onManage} /> : null}
         </View>
 
         <TouchableOpacity activeOpacity={0.85} onPress={onOpen}>
@@ -1083,15 +1089,75 @@ function PastDueBadge() {
   );
 }
 
+// ── card manage button (delete / archive / unarchive) ──────────────
+// The icon reflects the lifecycle action available for this plan:
+//   draft/scheduled → trash (delete)   live/completed → archive
+//   archived        → unarchive
+function manageActionIcon(plan: PlanVM): {
+  name: keyof typeof Ionicons.glyphMap;
+  color: string;
+  label: string;
+} {
+  if (plan.archived)
+    return {
+      name: "arrow-undo-outline",
+      color: colors.text.secondary,
+      label: "Unarchive practice",
+    };
+  if (plan.status === "draft" || plan.status === "scheduled")
+    return {
+      name: "trash-outline",
+      color: colors.red.semantic,
+      label: "Delete practice",
+    };
+  return {
+    name: "archive-outline",
+    color: colors.text.secondary,
+    label: "Archive practice",
+  };
+}
+
+function CardManageButton({
+  plan,
+  onPress,
+}: {
+  plan: PlanVM;
+  onPress: () => void;
+}) {
+  const icon = manageActionIcon(plan);
+  return (
+    <TouchableOpacity
+      activeOpacity={0.7}
+      hitSlop={8}
+      accessibilityLabel={icon.label}
+      onPress={(e) => {
+        e.stopPropagation();
+        onPress();
+      }}
+      style={{
+        width: 30,
+        height: 30,
+        borderRadius: radius.md,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Ionicons name={icon.name} size={17} color={icon.color} />
+    </TouchableOpacity>
+  );
+}
+
 // ── compact plan card ───────────────────────────────────────────────
 
 function PlanCard({
   plan,
   onPress,
+  onManage,
   pastDue,
 }: {
   plan: PlanVM;
   onPress: () => void;
+  onManage?: () => void;
   pastDue?: boolean;
 }) {
   const isCompleted = plan.status === "completed";
@@ -1142,6 +1208,7 @@ function PlanCard({
             <MetaRow plan={plan} />
           </View>
           {pastDue ? <PastDueBadge /> : <StatusPill status={plan.status} mini />}
+          {onManage ? <CardManageButton plan={plan} onPress={onManage} /> : null}
         </View>
 
         {plan.drills > 0 ? (
@@ -1451,6 +1518,66 @@ export default function PracticeListScreen() {
     );
   };
 
+  // Manage a plan straight from its list card. Delete vs archive follows the
+  // lifecycle policy: draft/scheduled can be deleted outright; live/completed
+  // can only be archived; archived plans can be unarchived.
+  const managePlan = (plan: PlanVM) => {
+    lightHaptic();
+    const reloadOr = (label: string) => async (patch: object | null) => {
+      const q = supabase.from("practice_plans");
+      const { error } = patch
+        ? await q.update(patch).eq("id", plan.id)
+        : await q.delete().eq("id", plan.id);
+      if (error) {
+        Alert.alert(`Couldn't ${label} practice`, error.message);
+        return;
+      }
+      await load();
+    };
+    if (plan.archived) {
+      Alert.alert(
+        "Unarchive practice?",
+        "It returns to your active practice lists.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Unarchive",
+            onPress: () => reloadOr("unarchive")({ archived_at: null }),
+          },
+        ]
+      );
+      return;
+    }
+    if (plan.status === "draft" || plan.status === "scheduled") {
+      Alert.alert(
+        "Delete practice?",
+        "This permanently removes the plan and its schedule. This can't be undone.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Delete",
+            style: "destructive",
+            onPress: () => reloadOr("delete")(null),
+          },
+        ]
+      );
+      return;
+    }
+    // live / completed → archive only
+    Alert.alert(
+      "Archive practice?",
+      "It moves to your Archived list and out of the active views. You can unarchive it later.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Archive",
+          onPress: () =>
+            reloadOr("archive")({ archived_at: new Date().toISOString() }),
+        },
+      ]
+    );
+  };
+
   // Duplicate a plan into a fresh independent draft, then open it for editing.
   // Copies title, notes and the drill schedule — never the date, time, status,
   // or any logged (RSVP / completion) data.
@@ -1711,6 +1838,7 @@ export default function PracticeListScreen() {
             onPress={() => goToPlan(p.id)}
             onLive={() => router.push(`/practice/${p.id}/run` as never)}
             onSendToScheduled={() => sendLiveToScheduled(p.id)}
+            onManage={() => managePlan(p)}
             busy={startingId === p.id}
           />
         ))}
@@ -1738,6 +1866,7 @@ export default function PracticeListScreen() {
                 onStart={() => goToPlan(groups.nextUp!.id)}
                 onEdit={() => goToEdit(groups.nextUp!.id)}
                 onDuplicate={() => duplicatePlan(groups.nextUp!.id)}
+                onManage={() => managePlan(groups.nextUp!)}
               />
             )}
           </>
@@ -1756,7 +1885,12 @@ export default function PracticeListScreen() {
             {!collapsed.has("thisWeek") && (
               <View style={{ paddingHorizontal: PADH, gap: 10 }}>
                 {groups.restWeek.map((p) => (
-                  <PlanCard key={p.id} plan={p} onPress={() => goToPlan(p.id)} />
+                  <PlanCard
+                  key={p.id}
+                  plan={p}
+                  onPress={() => goToPlan(p.id)}
+                  onManage={() => managePlan(p)}
+                />
                 ))}
               </View>
             )}
@@ -1780,6 +1914,7 @@ export default function PracticeListScreen() {
                     key={p.id}
                     plan={p}
                     pastDue
+                    onManage={() => managePlan(p)}
                     onPress={() =>
                       router.push(
                         (p.status === "live"
@@ -1807,7 +1942,12 @@ export default function PracticeListScreen() {
             {!collapsed.has("drafts") && (
               <View style={{ paddingHorizontal: PADH, gap: 10 }}>
                 {groups.drafts.map((p) => (
-                  <PlanCard key={p.id} plan={p} onPress={() => goToPlan(p.id)} />
+                  <PlanCard
+                  key={p.id}
+                  plan={p}
+                  onPress={() => goToPlan(p.id)}
+                  onManage={() => managePlan(p)}
+                />
                 ))}
               </View>
             )}
@@ -1827,7 +1967,12 @@ export default function PracticeListScreen() {
             {!collapsed.has("recent") && (
               <View style={{ paddingHorizontal: PADH, gap: 10 }}>
                 {groups.completed.map((p) => (
-                  <PlanCard key={p.id} plan={p} onPress={() => goToPlan(p.id)} />
+                  <PlanCard
+                  key={p.id}
+                  plan={p}
+                  onPress={() => goToPlan(p.id)}
+                  onManage={() => managePlan(p)}
+                />
                 ))}
               </View>
             )}
@@ -1847,7 +1992,12 @@ export default function PracticeListScreen() {
             {!collapsed.has("archived") && (
               <View style={{ paddingHorizontal: PADH, gap: 10 }}>
                 {groups.archived.map((p) => (
-                  <PlanCard key={p.id} plan={p} onPress={() => goToPlan(p.id)} />
+                  <PlanCard
+                  key={p.id}
+                  plan={p}
+                  onPress={() => goToPlan(p.id)}
+                  onManage={() => managePlan(p)}
+                />
                 ))}
               </View>
             )}
