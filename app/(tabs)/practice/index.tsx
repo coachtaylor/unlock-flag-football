@@ -1286,22 +1286,19 @@ export default function PracticeListScreen() {
     setRoster(rosterRes.count ?? 0);
 
     const now = Date.now();
-    // Live practices that slipped >6h past their scheduled start are stale —
-    // pause them (back to scheduled) so the run timer stops. The write is
-    // fired once below; the VM reflects the paused status immediately.
-    const toPause: string[] = [];
-    const next = rows.map((r) => {
+    setPlans(
+      rows.map((r) => {
         const ppd = r.practice_plan_drills ?? [];
         const duration = ppd.reduce(
           (s, d) => s + (d.duration_minutes ?? 0),
           0
         );
+        // Past-due is derived only — we keep the practice in its real status
+        // (a stale "live" practice stays live so it can be resumed with its
+        // data intact). It's surfaced under "Needs Attention" and pulled out
+        // of the active live ribbon by the grouping below.
         const pastDue = isPastDue(r.practice_date, r.start_time, now);
-        let status = normalizeStatus(r.status);
-        if (status === "live" && pastDue) {
-          toPause.push(r.id);
-          status = "scheduled";
-        }
+        const status = normalizeStatus(r.status);
         const vm: PlanVM = {
           id: r.id,
           title: r.title,
@@ -1332,19 +1329,8 @@ export default function PracticeListScreen() {
           vm.progressMin = Math.max(0, Math.min(duration, elapsed));
         }
         return vm;
-      });
-
-    if (toPause.length > 0) {
-      const { error } = await supabase
-        .from("practice_plans")
-        .update({ status: "scheduled", started_at: null })
-        .in("id", toPause);
-      if (error) {
-        console.warn("auto-pause past-due practices failed:", error.message);
-      }
-    }
-
-    setPlans(next);
+      })
+    );
   }, [teamId]);
 
   useEffect(() => {
@@ -1720,7 +1706,13 @@ export default function PracticeListScreen() {
                   key={p.id}
                   plan={p}
                   pastDue
-                  onPress={() => goToPlan(p.id)}
+                  onPress={() =>
+                    router.push(
+                      (p.status === "live"
+                        ? `/practice/${p.id}/run?pastdue=1`
+                        : `/practice/${p.id}?pastdue=1`) as never
+                    )
+                  }
                 />
               ))}
             </View>

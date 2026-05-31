@@ -26,6 +26,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "../../../../components/ui/Button";
 import { Eyebrow } from "../../../../components/ui/Eyebrow";
+import { PastDueModal } from "../../../../components/ui/PastDueModal";
 import {
   PracticeAttendanceSheet,
   type AttendancePlayer,
@@ -491,10 +492,16 @@ function SkippedPill() {
 export default function PracticePlanDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, pastdue } = useLocalSearchParams<{
+    id: string;
+    pastdue?: string;
+  }>();
 
   const [loading, setLoading] = useState(true);
   const [plan, setPlan] = useState<Plan | null>(null);
+  // Shown when arriving from a "Needs Attention" card (?pastdue=1). Lets the
+  // coach reschedule, log, or delete the stale practice.
+  const [pastDueOpen, setPastDueOpen] = useState(pastdue === "1");
   const [log, setLog] = useState<PracticeLog | null>(null);
   const [busy, setBusy] = useState(false);
   const [attendancePlayers, setAttendancePlayers] = useState<
@@ -1081,6 +1088,35 @@ export default function PracticePlanDetailScreen() {
             // Stay on the plan detail page — Begin practice handles the
             // jump to the run timer when the coach is ready.
             await load();
+          },
+        },
+      ]
+    );
+  };
+
+  const deletePlan = () => {
+    if (!plan) return;
+    Alert.alert(
+      "Delete practice?",
+      "This permanently removes the plan and its schedule. This can't be undone.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            setBusy(true);
+            const { error } = await supabase
+              .from("practice_plans")
+              .delete()
+              .eq("id", plan.id);
+            setBusy(false);
+            if (error) {
+              Alert.alert("Couldn't delete practice", error.message);
+              return;
+            }
+            setPastDueOpen(false);
+            router.back();
           },
         },
       ]
@@ -2173,6 +2209,36 @@ export default function PracticePlanDetailScreen() {
         dateLabel={formatLongDate(plan.practiceDate)}
         players={attendancePlayers}
         onChanged={load}
+      />
+
+      <PastDueModal
+        open={pastDueOpen}
+        onClose={() => setPastDueOpen(false)}
+        title="This practice is past due."
+        body="It came and went without being closed out. Reschedule it, log what happened, or delete the plan."
+        actions={[
+          {
+            label: "Log practice",
+            variant: "primary",
+            onPress: () => {
+              setPastDueOpen(false);
+              router.push(`/practice/${plan.id}/log` as never);
+            },
+          },
+          {
+            label: "Reschedule",
+            variant: "secondary",
+            onPress: () => {
+              setPastDueOpen(false);
+              router.push(`/practice/${plan.id}/edit` as never);
+            },
+          },
+          {
+            label: "Delete",
+            variant: "destructive",
+            onPress: deletePlan,
+          },
+        ]}
       />
     </View>
   );

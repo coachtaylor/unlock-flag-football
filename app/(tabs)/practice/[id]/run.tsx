@@ -25,6 +25,7 @@ import * as Haptics from "expo-haptics";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card } from "../../../../components/ui/Card";
 import { Button } from "../../../../components/ui/Button";
+import { PastDueModal } from "../../../../components/ui/PastDueModal";
 import { colors, radius, spacing } from "../../../../constants/design";
 import { fontStyle, monoStyle } from "../../../../constants/typography";
 import {
@@ -897,7 +898,14 @@ export default function RunPracticeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, pastdue } = useLocalSearchParams<{
+    id: string;
+    pastdue?: string;
+  }>();
+  // Shown when arriving from a "Needs Attention" card (?pastdue=1): the
+  // practice is stale but still live, so the coach can resume where they
+  // left off or close it out by logging.
+  const [pastDueOpen, setPastDueOpen] = useState(pastdue === "1");
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -2418,6 +2426,28 @@ export default function RunPracticeScreen() {
           </TouchableOpacity>
         </View>
       ) : null}
+
+      <PastDueModal
+        open={pastDueOpen}
+        onClose={() => setPastDueOpen(false)}
+        title="This practice is past due."
+        body="It was left running. Pick up where you left off, or close it out by logging what happened."
+        actions={[
+          {
+            label: "Resume",
+            variant: "primary",
+            onPress: () => setPastDueOpen(false),
+          },
+          {
+            label: "Log practice",
+            variant: "secondary",
+            onPress: () => {
+              setPastDueOpen(false);
+              router.push(`/practice/${plan.id}/log` as never);
+            },
+          },
+        ]}
+      />
     </KeyboardAvoidingView>
   );
 }
