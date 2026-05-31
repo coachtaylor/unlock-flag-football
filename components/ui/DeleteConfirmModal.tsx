@@ -14,6 +14,9 @@ import { fontStyle, MonoText } from "../../constants/typography";
 // To prevent an accidental tap from wiping a plan + its logged data, the
 // coach must type the practice title back exactly (case-sensitive). The
 // Delete button stays disabled until the typed value matches.
+//
+// Untitled practices have no name to match against, so they fall back to a
+// plain confirm (still a deliberate two-tap action, just no typing gate).
 export function DeleteConfirmModal({
   open,
   onClose,
@@ -23,8 +26,12 @@ export function DeleteConfirmModal({
 }: {
   open: boolean;
   onClose: () => void;
-  /** The practice title the coach must re-type to confirm (case-sensitive). */
-  title: string;
+  /**
+   * The practice title the coach must re-type to confirm (case-sensitive).
+   * Empty/whitespace => the practice is untitled and the typing gate is
+   * skipped.
+   */
+  title: string | null | undefined;
   onConfirm: () => void;
   busy?: boolean;
 }) {
@@ -33,7 +40,8 @@ export function DeleteConfirmModal({
     if (open) setValue("");
   }, [open]);
 
-  const matches = value === title;
+  const hasTitle = !!title && title.trim().length > 0;
+  const matches = !hasTitle || value === title;
 
   return (
     <Modal visible={open} animationType="fade" transparent onRequestClose={onClose}>
@@ -80,44 +88,51 @@ export function DeleteConfirmModal({
               { fontSize: 14, lineHeight: 20, color: colors.text.secondary },
             ]}
           >
-            Deleting removes the practice and all of its data for good. To confirm,
-            type the practice name below.
+            {hasTitle
+              ? "Deleting removes the practice and all of its data for good. To confirm, type the practice name below."
+              : "Deleting removes this practice and all of its data for good."}
           </Text>
 
-          <View
-            style={{
-              backgroundColor: colors.surface.overlay,
-              borderRadius: radius.md,
-              paddingHorizontal: spacing.md,
-              paddingVertical: spacing.sm,
-            }}
-          >
-            <MonoText style={{ fontSize: 13, color: colors.text.primary }}>
-              {title}
-            </MonoText>
-          </View>
+          {hasTitle ? (
+            <>
+              <View
+                style={{
+                  backgroundColor: colors.surface.overlay,
+                  borderRadius: radius.md,
+                  paddingHorizontal: spacing.md,
+                  paddingVertical: spacing.sm,
+                }}
+              >
+                <MonoText style={{ fontSize: 13, color: colors.text.primary }}>
+                  {title}
+                </MonoText>
+              </View>
 
-          <TextInput
-            value={value}
-            onChangeText={setValue}
-            placeholder="Type the practice name"
-            placeholderTextColor={colors.text.muted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={[
-              fontStyle("regular"),
-              {
-                fontSize: 15,
-                color: colors.text.primary,
-                backgroundColor: colors.surface.input,
-                borderWidth: 1,
-                borderColor: matches ? colors.red.semantic : colors.border.strong,
-                borderRadius: radius.md,
-                paddingHorizontal: spacing.md,
-                paddingVertical: 12,
-              },
-            ]}
-          />
+              <TextInput
+                value={value}
+                onChangeText={setValue}
+                placeholder="Type the practice name"
+                placeholderTextColor={colors.text.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                style={[
+                  fontStyle("regular"),
+                  {
+                    fontSize: 15,
+                    color: colors.text.primary,
+                    backgroundColor: colors.surface.input,
+                    borderWidth: 1,
+                    borderColor: matches
+                      ? colors.red.semantic
+                      : colors.border.strong,
+                    borderRadius: radius.md,
+                    paddingHorizontal: spacing.md,
+                    paddingVertical: 12,
+                  },
+                ]}
+              />
+            </>
+          ) : null}
 
           <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
             <TouchableOpacity

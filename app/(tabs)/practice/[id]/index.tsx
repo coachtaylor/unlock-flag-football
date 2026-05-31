@@ -2324,7 +2324,7 @@ export default function PracticePlanDetailScreen() {
       <DeleteConfirmModal
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
-        title={plan.title || "Untitled plan"}
+        title={plan.title}
         busy={busy}
         onConfirm={deletePlan}
       />

@@ -1887,7 +1887,7 @@ export default function PracticeListScreen() {
       <DeleteConfirmModal
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        title={deleteTarget?.title || "Untitled plan"}
+        title={deleteTarget?.title}
         busy={deleting}
         onConfirm={async () => {
           if (!deleteTarget) return;
