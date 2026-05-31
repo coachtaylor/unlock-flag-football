@@ -1738,9 +1738,31 @@ export default function PracticePlanDetailScreen() {
                       : head.categoryName
                       ? colorForCategory(head.categoryName)
                       : colors.border.strong;
+                    // For a single-drill card the whole card toggles expand.
+                    // Parallel cards keep per-drill header toggles (one card,
+                    // several independently-expandable drills).
+                    const cardDrill = isParallel ? null : block[0];
+                    const cardExpandable =
+                      cardDrill != null &&
+                      (!!cardDrill.description ||
+                        !!cardDrill.equipmentLabel ||
+                        !!cardDrill.drillId);
+                    const cardExpanded =
+                      cardDrill != null && expandedDrillIds.has(cardDrill.id);
                     return (
-                      <View
+                      <TouchableOpacity
                         key={head.id}
+                        activeOpacity={cardExpandable ? 0.7 : 1}
+                        onPress={
+                          cardExpandable
+                            ? () => toggleDrillExpanded(cardDrill!.id)
+                            : undefined
+                        }
+                        disabled={!cardExpandable}
+                        accessibilityRole={cardExpandable ? "button" : undefined}
+                        accessibilityState={
+                          cardExpandable ? { expanded: cardExpanded } : undefined
+                        }
                         style={{
                       backgroundColor: colors.surface.raised,
                       borderRadius: radius.lg,
@@ -2000,7 +2022,7 @@ export default function PracticePlanDetailScreen() {
                         {head.durationMinutes ?? 0} min
                       </Text>
                     </View>
-                  </View>
+                  </TouchableOpacity>
                 );
                   })}
                 </View>
