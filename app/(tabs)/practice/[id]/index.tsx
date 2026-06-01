@@ -1107,9 +1107,10 @@ export default function PracticePlanDetailScreen() {
               })
               .eq("practice_plan_id", plan.id);
             setBusy(false);
-            // Stay on the plan detail page — Begin practice handles the
-            // jump to the run timer when the coach is ready.
-            await load();
+            // Jump straight into the live run screen. The timer still doesn't
+            // start until the coach taps Start timer there — this just opens
+            // the execution view so they're not stuck on the plan detail page.
+            router.push(`/practice/${plan.id}/run` as never);
           },
         },
       ],
