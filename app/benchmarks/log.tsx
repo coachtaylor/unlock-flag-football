@@ -19,7 +19,12 @@ import {
   type BenchmarkType,
 } from "../../constants/benchmarks";
 import { colors, fontFamily, radius, spacing } from "../../constants/design";
+import { skillGroupMeta } from "../../constants/skill-groups";
 import { supabase } from "../../lib/supabase";
+import {
+  loadBenchmarkSkillTags,
+  type SkillTagGroup,
+} from "../../lib/skills";
 import { useAuth } from "../../lib/auth-context";
 import { useTeam } from "../../lib/team-context";
 import {
@@ -70,10 +75,11 @@ const todayString = (): string => {
   ).padStart(2, "0")}`;
 };
 
-// Tap-to-insert chips for the observation modal. Match the canonical list
-// from the legacy benchmark log so the dashboard's tag analytics keep
-// counting consistent phrases.
-const QUICK_NOTES = [
+// Generic fallback chips for the observation modal — used only when the
+// drill has no drill_skills wired up. Once a drill is tagged (or cloned
+// from the preset library) the skill-aware chip groups take over. These
+// toggle benchmark_results.tags[] (text[]).
+const FALLBACK_TAGS = [
   "Good hands",
   "Quick feet",
   "Needs footwork help",
@@ -109,6 +115,62 @@ const formatStat = (
   }
 };
 
+// Uppercase micro-label used for the tag-group headers in the observation
+// modal. Matches the existing "Quick notes" eyebrow styling.
+function MicroLabel({ children }: { children: string }) {
+  return (
+    <Text
+      style={{
+        fontSize: 10,
+        letterSpacing: 1,
+        textTransform: "uppercase",
+        color: colors.text.subtle,
+        fontFamily: fontFamily.sansBold,
+      }}
+    >
+      {children}
+    </Text>
+  );
+}
+
+// Toggle chip for a skill tag. Selected = orange (the app's universal
+// "selected tag" treatment — tags are never color-coded by skill group;
+// the group's hue lives on the header dot only).
+function TagChip({
+  label,
+  selected,
+  onPress,
+}: {
+  label: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      activeOpacity={0.75}
+      style={{
+        paddingHorizontal: 10,
+        paddingVertical: 7,
+        borderRadius: radius.pill,
+        backgroundColor: selected ? colors.orange.tint : colors.surface.raised,
+        borderWidth: 1,
+        borderColor: selected ? colors.orange.tintBorder : colors.border.card,
+      }}
+    >
+      <Text
+        style={{
+          fontSize: 12,
+          fontFamily: fontFamily.sansSemibold,
+          color: selected ? colors.orange[400] : colors.text.secondary,
+        }}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function BenchmarkLogScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -139,6 +201,16 @@ export default function BenchmarkLogScreen() {
   const [captureMap, setCaptureMap] = useState<CaptureMap>({});
   const [attemptMap, setAttemptMap] = useState<AttemptMap>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
+  // Skill-tag chips for this drill (Build 14c). Empty → fallback chips.
+  const [skillTagGroups, setSkillTagGroups] = useState<SkillTagGroup[]>([]);
+  // Per-player committed observation state: selected tag labels + review flag.
+  const [selectedTags, setSelectedTags] = useState<Record<string, Set<string>>>(
+    {}
+  );
+  const [needsReview, setNeedsReview] = useState<Record<string, boolean>>({});
+  // Drafts while the observation modal is open (committed on Save).
+  const [tagsDraft, setTagsDraft] = useState<Set<string>>(new Set());
+  const [reviewDraft, setReviewDraft] = useState(false);
   // Sets is mutable mid-flow so coaches can extend a session on the fly
   // (e.g., "give them one more rep"). Bumping never overwrites existing
   // saved sets — it just appends new stops.
@@ -168,7 +240,7 @@ export default function BenchmarkLogScreen() {
 
     (async () => {
       const today = todayString();
-      const [drillRes, playersRes, existingRes] = await Promise.all([
+      const [drillRes, playersRes, existingRes, skillTagRes] = await Promise.all([
         supabase
           .from("team_drills")
           .select(
@@ -200,12 +272,13 @@ export default function BenchmarkLogScreen() {
         supabase
           .from("benchmark_results")
           .select(
-            "player_id, benchmark_type, set_number, time_seconds, rating, made_count, attempts_count, inverse, notes"
+            "player_id, benchmark_type, set_number, time_seconds, rating, made_count, attempts_count, inverse, notes, tags, needs_review"
           )
           .eq("team_id", teamId)
           .eq("drill_id", drillId)
           .eq("assessment_date", today)
           .in("player_id", playerIds),
+        loadBenchmarkSkillTags(drillId),
       ]);
 
       if (cancelled) return;
@@ -246,6 +319,8 @@ export default function BenchmarkLogScreen() {
       const initialCapture: CaptureMap = {};
       const initialAttempts: AttemptMap = {};
       const initialNotes: Record<string, string> = {};
+      const initialTags: Record<string, Set<string>> = {};
+      const initialReview: Record<string, boolean> = {};
       for (const r of existingRes.data ?? []) {
         const type = (r.benchmark_type as BenchmarkType | null) ?? null;
         const setNum = (r.set_number as number | null) ?? null;
@@ -274,12 +349,22 @@ export default function BenchmarkLogScreen() {
         if (r.notes && typeof r.notes === "string" && !initialNotes[playerId]) {
           initialNotes[playerId] = r.notes;
         }
+        // Tags + review flag merge across this player's saved rows.
+        if (Array.isArray(r.tags) && r.tags.length > 0) {
+          const set = initialTags[playerId] ?? new Set<string>();
+          for (const t of r.tags as string[]) if (t) set.add(t);
+          initialTags[playerId] = set;
+        }
+        if (r.needs_review) initialReview[playerId] = true;
       }
 
       setAllPlayers(ordered);
       setCaptureMap(initialCapture);
       setAttemptMap(initialAttempts);
       setNotes(initialNotes);
+      setSelectedTags(initialTags);
+      setNeedsReview(initialReview);
+      setSkillTagGroups(skillTagRes);
       setLoading(false);
     })();
 
@@ -519,7 +604,7 @@ export default function BenchmarkLogScreen() {
         assessment_date: date,
         time_seconds: payload.time_seconds,
         rating: payload.rating,
-        tags: [] as string[],
+        tags: Array.from(selectedTags[currentStop.playerId] ?? []),
         notes: notes[currentStop.playerId]?.trim() || null,
         benchmark_type: payload.benchmark_type,
         set_number: payload.set_number,
@@ -528,6 +613,11 @@ export default function BenchmarkLogScreen() {
         attempts_count: payload.attempts_count,
         inverse: payload.inverse,
         rated_label: payload.rated_label,
+        // Mobile-capture columns (Build 14c). Formal assessment, on mobile,
+        // with the captain's per-player review flag.
+        entry_mode: "benchmark",
+        captured_on: "mobile",
+        needs_review: needsReview[currentStop.playerId] ?? false,
       };
 
       let writeErr: { message: string } | null = null;
@@ -573,6 +663,8 @@ export default function BenchmarkLogScreen() {
     drillId,
     captureMap,
     notes,
+    selectedTags,
+    needsReview,
     typesForCurrent,
   ]);
 
@@ -720,13 +812,28 @@ export default function BenchmarkLogScreen() {
   // ── Note modal ───────────────────────────────────────────────────
   const openNoteForCurrent = () => {
     if (!currentStop) return;
-    setNoteOpenForPlayerId(currentStop.playerId);
-    setNoteDraft(notes[currentStop.playerId] ?? "");
+    const pid = currentStop.playerId;
+    setNoteOpenForPlayerId(pid);
+    setNoteDraft(notes[pid] ?? "");
+    setTagsDraft(new Set(selectedTags[pid] ?? []));
+    setReviewDraft(needsReview[pid] ?? false);
+  };
+
+  const toggleTagDraft = (label: string) => {
+    setTagsDraft((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
   };
 
   const saveNote = () => {
     if (!noteOpenForPlayerId) return;
-    setNotes((prev) => ({ ...prev, [noteOpenForPlayerId]: noteDraft }));
+    const pid = noteOpenForPlayerId;
+    setNotes((prev) => ({ ...prev, [pid]: noteDraft }));
+    setSelectedTags((prev) => ({ ...prev, [pid]: new Set(tagsDraft) }));
+    setNeedsReview((prev) => ({ ...prev, [pid]: reviewDraft }));
     setNoteOpenForPlayerId(null);
   };
 
@@ -1187,7 +1294,11 @@ export default function BenchmarkLogScreen() {
         {/* Observation row */}
         <ObservationRow
           onPress={openNoteForCurrent}
-          hasNote={!!notes[currentStop.playerId]}
+          hasNote={
+            !!notes[currentStop.playerId] ||
+            (selectedTags[currentStop.playerId]?.size ?? 0) > 0 ||
+            !!needsReview[currentStop.playerId]
+          }
           style={{ marginBottom: 12 }}
         />
 
@@ -1314,81 +1425,136 @@ export default function BenchmarkLogScreen() {
                 />
               </TouchableOpacity>
             </View>
-            {/* Quick-tap chips — tap to insert / toggle */}
-            <View style={{ gap: spacing.xs }}>
-              <Text
-                style={{
-                  fontSize: 10,
-                  letterSpacing: 1,
-                  textTransform: "uppercase",
-                  color: colors.text.subtle,
-                  fontFamily: fontFamily.sansBold,
-                }}
-              >
-                Quick notes
-              </Text>
-              <View
-                style={{
-                  flexDirection: "row",
-                  flexWrap: "wrap",
-                  gap: 6,
-                }}
-              >
-                {QUICK_NOTES.map((tag) => {
-                  const present = noteDraft
-                    .toLowerCase()
-                    .includes(tag.toLowerCase());
+            {/* Skill-tag chips → benchmark_results.tags[]. Grouped by skill
+                (primary first); falls back to a generic set when the drill
+                has no skills wired up yet. */}
+            {skillTagGroups.length === 0 ? (
+              <View style={{ gap: spacing.xs }}>
+                <MicroLabel>Quick tags</MicroLabel>
+                <View
+                  style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}
+                >
+                  {FALLBACK_TAGS.map((label) => (
+                    <TagChip
+                      key={label}
+                      label={label}
+                      selected={tagsDraft.has(label)}
+                      onPress={() => toggleTagDraft(label)}
+                    />
+                  ))}
+                </View>
+              </View>
+            ) : (
+              <View style={{ gap: spacing.md }}>
+                {skillTagGroups.map((group) => {
+                  const meta = skillGroupMeta(group.skillGroup);
+                  const isPrimary = group.weight === 1.0;
                   return (
-                    <TouchableOpacity
-                      key={tag}
-                      onPress={() => {
-                        if (present) {
-                          // Remove the tag (and a trailing separator if any)
-                          const re = new RegExp(
-                            `\\s*${tag.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\s*[,.;·]?\\s*`,
-                            "i"
-                          );
-                          setNoteDraft((d) => d.replace(re, " ").trim());
-                        } else {
-                          setNoteDraft((d) =>
-                            d.trim().length > 0 ? `${d.trim()}, ${tag}` : tag
-                          );
-                        }
-                      }}
-                      activeOpacity={0.75}
-                      style={{
-                        paddingHorizontal: 10,
-                        paddingVertical: 7,
-                        borderRadius: radius.pill,
-                        backgroundColor: present
-                          ? colors.orange.tint
-                          : colors.surface.raised,
-                        borderWidth: 1,
-                        borderColor: present
-                          ? colors.orange.tintBorder
-                          : colors.border.card,
-                      }}
-                    >
-                      <Text
+                    <View key={group.skillId} style={{ gap: spacing.xs }}>
+                      <View
                         style={{
-                          fontSize: 12,
-                          fontFamily: fontFamily.sansSemibold,
-                          color: present
-                            ? colors.orange[400]
-                            : colors.text.secondary,
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
                         }}
                       >
-                        {tag}
-                      </Text>
-                    </TouchableOpacity>
+                        <View
+                          style={{
+                            width: 6,
+                            height: 6,
+                            borderRadius: 3,
+                            backgroundColor: meta.color,
+                            opacity: isPrimary ? 1 : 0.5,
+                          }}
+                        />
+                        <MicroLabel>{group.skillName}</MicroLabel>
+                        {isPrimary && (
+                          <Text
+                            style={{
+                              fontSize: 10,
+                              letterSpacing: 0.5,
+                              color: meta.color,
+                              fontFamily: fontFamily.sansBold,
+                            }}
+                          >
+                            ★ PRIMARY
+                          </Text>
+                        )}
+                      </View>
+                      <View
+                        style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}
+                      >
+                        {group.tags.map((t) => (
+                          <TagChip
+                            key={t.id}
+                            label={t.label}
+                            selected={tagsDraft.has(t.label)}
+                            onPress={() => toggleTagDraft(t.label)}
+                          />
+                        ))}
+                      </View>
+                    </View>
                   );
                 })}
               </View>
-            </View>
+            )}
+
+            {/* Mark for review — captain revisits on the dashboard later */}
+            <TouchableOpacity
+              onPress={() => setReviewDraft((v) => !v)}
+              activeOpacity={0.7}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: spacing.sm,
+                paddingVertical: 4,
+              }}
+            >
+              <View
+                style={{
+                  width: 22,
+                  height: 22,
+                  borderRadius: 6,
+                  borderWidth: 1.5,
+                  borderColor: reviewDraft
+                    ? colors.orange[500]
+                    : colors.border.strong,
+                  backgroundColor: reviewDraft
+                    ? colors.orange[500]
+                    : "transparent",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {reviewDraft && (
+                  <Ionicons name="checkmark" size={14} color={colors.text.onBrand} />
+                )}
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={{
+                    fontSize: 13,
+                    fontFamily: fontFamily.sansSemibold,
+                    color: colors.text.primary,
+                  }}
+                >
+                  Mark for review
+                </Text>
+                <Text
+                  style={{
+                    fontSize: 11,
+                    color: colors.text.muted,
+                    fontFamily: fontFamily.sans,
+                  }}
+                >
+                  Flag this entry to revisit on the dashboard
+                </Text>
+              </View>
+            </TouchableOpacity>
             <TextInput
               value={noteDraft}
               onChangeText={setNoteDraft}
-              placeholder="Or write your own…"
+              placeholder="Notes (optional)…"
               placeholderTextColor={colors.text.muted}
               multiline
               style={{

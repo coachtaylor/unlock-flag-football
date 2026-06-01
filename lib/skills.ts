@@ -166,3 +166,88 @@ export function toPickerInitial(
   for (const t of tagged) map.set(t.id, t.weight);
   return map;
 }
+
+// One skill's worth of quick-tap chips for the benchmark log flow. Tags
+// carry their id but the benchmark_results.tags[] column stores the LABEL
+// (text[]) so history stays readable without a join. Mirrors the web
+// SkillTagGroup (unlock-web benchmarks/log).
+export type SkillTagGroup = {
+  skillId: string;
+  skillName: string;
+  skillGroup: SkillGroup;
+  weight: DrillSkillWeight;
+  displayOrder: number;
+  tags: { id: string; label: string }[];
+};
+
+/**
+ * Load the skill-tag chip groups for one drill: its drill_skills → skills →
+ * active skill_tags, grouped per skill, primary (weight 1.0) first then by
+ * skill display_order. Skills with no active tags are dropped. Returns []
+ * (never throws) so the log screen can fall back to a generic chip set.
+ */
+export async function loadBenchmarkSkillTags(
+  drillId: string
+): Promise<SkillTagGroup[]> {
+  if (!drillId) return [];
+
+  const linkRes = await supabase
+    .from("drill_skills")
+    .select("skill_id, weight, skills(id, skill_name, skill_group, display_order)")
+    .eq("drill_id", drillId);
+  if (linkRes.error) {
+    console.warn("[skills] benchmark tags load error:", linkRes.error.message);
+    return [];
+  }
+
+  type Row = {
+    skill_id: string;
+    weight: number;
+    skills: {
+      id: string;
+      skill_name: string;
+      skill_group: string;
+      display_order: number;
+    } | null;
+  };
+  // supabase-js infers the embedded `skills` as an array from the select
+  // string, but a to-one FK embed is a single object at runtime — cast
+  // through unknown to the real shape.
+  const rows = ((linkRes.data as unknown as Row[] | null) ?? []).filter(
+    (r) => r.skills
+  );
+  const skillIds = rows.map((r) => r.skill_id);
+  if (skillIds.length === 0) return [];
+
+  const tagRes = await supabase
+    .from("skill_tags")
+    .select("id, skill_id, label, display_order, is_active")
+    .in("skill_id", skillIds)
+    .eq("is_active", true)
+    .order("display_order", { ascending: true });
+  if (tagRes.error) {
+    console.warn("[skill_tags] load error:", tagRes.error.message);
+    return [];
+  }
+
+  const tagsBySkill = new Map<string, { id: string; label: string }[]>();
+  for (const t of tagRes.data ?? []) {
+    const arr = tagsBySkill.get(t.skill_id as string) ?? [];
+    arr.push({ id: t.id as string, label: t.label as string });
+    tagsBySkill.set(t.skill_id as string, arr);
+  }
+
+  return rows
+    .map((r) => ({
+      skillId: r.skill_id,
+      skillName: r.skills!.skill_name,
+      skillGroup: r.skills!.skill_group as SkillGroup,
+      weight: (Number(r.weight) === 1 ? 1.0 : 0.5) as DrillSkillWeight,
+      displayOrder: r.skills!.display_order ?? 0,
+      tags: tagsBySkill.get(r.skill_id) ?? [],
+    }))
+    .filter((g) => g.tags.length > 0)
+    .sort((a, b) =>
+      a.weight !== b.weight ? b.weight - a.weight : a.displayOrder - b.displayOrder
+    );
+}
