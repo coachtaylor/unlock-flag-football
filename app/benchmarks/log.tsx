@@ -19,12 +19,14 @@ import {
   type BenchmarkType,
 } from "../../constants/benchmarks";
 import { colors, fontFamily, radius, spacing } from "../../constants/design";
-import { skillGroupMeta } from "../../constants/skill-groups";
 import { supabase } from "../../lib/supabase";
+import { localDateString } from "../../lib/date";
+import { upsertBenchmarkResult } from "../../lib/benchmarks";
 import {
   loadBenchmarkSkillTags,
   type SkillTagGroup,
 } from "../../lib/skills";
+import { SkillTagChips } from "../../components/benchmark/SkillTagChips";
 import { useAuth } from "../../lib/auth-context";
 import { useTeam } from "../../lib/team-context";
 import {
@@ -68,27 +70,6 @@ import {
 
 type AttemptMap = Record<string, AttemptState[]>; // setKey → attempts
 
-const todayString = (): string => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
-};
-
-// Generic fallback chips for the observation modal — used only when the
-// drill has no drill_skills wired up. Once a drill is tagged (or cloned
-// from the preset library) the skill-aware chip groups take over. These
-// toggle benchmark_results.tags[] (text[]).
-const FALLBACK_TAGS = [
-  "Good hands",
-  "Quick feet",
-  "Needs footwork help",
-  "Sharp routes",
-  "Slow reaction",
-  "Strong arm",
-  "Good vision",
-];
-
 const formatStat = (
   type: BenchmarkType,
   set: CapturedSet | undefined
@@ -117,60 +98,6 @@ const formatStat = (
 
 // Uppercase micro-label used for the tag-group headers in the observation
 // modal. Matches the existing "Quick notes" eyebrow styling.
-function MicroLabel({ children }: { children: string }) {
-  return (
-    <Text
-      style={{
-        fontSize: 10,
-        letterSpacing: 1,
-        textTransform: "uppercase",
-        color: colors.text.subtle,
-        fontFamily: fontFamily.sansBold,
-      }}
-    >
-      {children}
-    </Text>
-  );
-}
-
-// Toggle chip for a skill tag. Selected = orange (the app's universal
-// "selected tag" treatment — tags are never color-coded by skill group;
-// the group's hue lives on the header dot only).
-function TagChip({
-  label,
-  selected,
-  onPress,
-}: {
-  label: string;
-  selected: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <TouchableOpacity
-      onPress={onPress}
-      activeOpacity={0.75}
-      style={{
-        paddingHorizontal: 10,
-        paddingVertical: 7,
-        borderRadius: radius.pill,
-        backgroundColor: selected ? colors.orange.tint : colors.surface.raised,
-        borderWidth: 1,
-        borderColor: selected ? colors.orange.tintBorder : colors.border.card,
-      }}
-    >
-      <Text
-        style={{
-          fontSize: 12,
-          fontFamily: fontFamily.sansSemibold,
-          color: selected ? colors.orange[400] : colors.text.secondary,
-        }}
-      >
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
-}
-
 export default function BenchmarkLogScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -239,7 +166,7 @@ export default function BenchmarkLogScreen() {
     }
 
     (async () => {
-      const today = todayString();
+      const today = localDateString();
       const [drillRes, playersRes, existingRes, skillTagRes] = await Promise.all([
         supabase
           .from("team_drills")
@@ -552,7 +479,7 @@ export default function BenchmarkLogScreen() {
 
     setSaving(true);
     setError(null);
-    const date = todayString();
+    const date = localDateString();
 
     // Build payloads for every type configured for this group; skip empty ones.
     const payloads: { type: BenchmarkType; payload: ReturnType<typeof buildSavePayload> }[] = [];
@@ -575,62 +502,31 @@ export default function BenchmarkLogScreen() {
       return false;
     }
 
-    // Upsert each (player, drill, date, type, set) row.
+    // Upsert each (player, drill, date, type, set) row through the shared
+    // benchmark write path (lib/benchmarks). entry_mode='benchmark' marks a
+    // deliberate assessment; captured_on='mobile' is stamped by the helper.
     for (const { payload } of payloads) {
       if (!payload) continue;
-      const { data: existing, error: lookupErr } = await supabase
-        .from("benchmark_results")
-        .select("id")
-        .eq("team_id", teamId)
-        .eq("drill_id", drillId)
-        .eq("player_id", currentStop.playerId)
-        .eq("assessed_by", user.id)
-        .eq("assessment_date", date)
-        .eq("benchmark_type", payload.benchmark_type)
-        .eq("set_number", payload.set_number)
-        .maybeSingle();
-
-      if (lookupErr) {
-        setSaving(false);
-        setError(lookupErr.message);
-        return false;
-      }
-
-      const row = {
+      const { error: writeErr } = await upsertBenchmarkResult({
         team_id: teamId,
         drill_id: drillId,
         player_id: currentStop.playerId,
         assessed_by: user.id,
         assessment_date: date,
-        time_seconds: payload.time_seconds,
-        rating: payload.rating,
-        tags: Array.from(selectedTags[currentStop.playerId] ?? []),
-        notes: notes[currentStop.playerId]?.trim() || null,
         benchmark_type: payload.benchmark_type,
         set_number: payload.set_number,
-        group_name: payload.group_name,
+        time_seconds: payload.time_seconds,
+        rating: payload.rating,
         made_count: payload.made_count,
         attempts_count: payload.attempts_count,
         inverse: payload.inverse,
         rated_label: payload.rated_label,
-        // Mobile-capture columns (Build 14c). Formal assessment, on mobile,
-        // with the captain's per-player review flag.
+        group_name: payload.group_name,
+        tags: Array.from(selectedTags[currentStop.playerId] ?? []),
+        notes: notes[currentStop.playerId]?.trim() || null,
         entry_mode: "benchmark",
-        captured_on: "mobile",
         needs_review: needsReview[currentStop.playerId] ?? false,
-      };
-
-      let writeErr: { message: string } | null = null;
-      if (existing?.id) {
-        const r = await supabase
-          .from("benchmark_results")
-          .update(row)
-          .eq("id", existing.id);
-        writeErr = r.error;
-      } else {
-        const r = await supabase.from("benchmark_results").insert(row);
-        writeErr = r.error;
-      }
+      });
       if (writeErr) {
         setSaving(false);
         setError(writeErr.message);
@@ -1427,77 +1323,12 @@ export default function BenchmarkLogScreen() {
             </View>
             {/* Skill-tag chips → benchmark_results.tags[]. Grouped by skill
                 (primary first); falls back to a generic set when the drill
-                has no skills wired up yet. */}
-            {skillTagGroups.length === 0 ? (
-              <View style={{ gap: spacing.xs }}>
-                <MicroLabel>Quick tags</MicroLabel>
-                <View
-                  style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}
-                >
-                  {FALLBACK_TAGS.map((label) => (
-                    <TagChip
-                      key={label}
-                      label={label}
-                      selected={tagsDraft.has(label)}
-                      onPress={() => toggleTagDraft(label)}
-                    />
-                  ))}
-                </View>
-              </View>
-            ) : (
-              <View style={{ gap: spacing.md }}>
-                {skillTagGroups.map((group) => {
-                  const meta = skillGroupMeta(group.skillGroup);
-                  const isPrimary = group.weight === 1.0;
-                  return (
-                    <View key={group.skillId} style={{ gap: spacing.xs }}>
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          alignItems: "center",
-                          gap: 6,
-                        }}
-                      >
-                        <View
-                          style={{
-                            width: 6,
-                            height: 6,
-                            borderRadius: 3,
-                            backgroundColor: meta.color,
-                            opacity: isPrimary ? 1 : 0.5,
-                          }}
-                        />
-                        <MicroLabel>{group.skillName}</MicroLabel>
-                        {isPrimary && (
-                          <Text
-                            style={{
-                              fontSize: 10,
-                              letterSpacing: 0.5,
-                              color: meta.color,
-                              fontFamily: fontFamily.sansBold,
-                            }}
-                          >
-                            ★ PRIMARY
-                          </Text>
-                        )}
-                      </View>
-                      <View
-                        style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}
-                      >
-                        {group.tags.map((t) => (
-                          <TagChip
-                            key={t.id}
-                            label={t.label}
-                            selected={tagsDraft.has(t.label)}
-                            onPress={() => toggleTagDraft(t.label)}
-                          />
-                        ))}
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
+                has no skills wired up yet. Shared with the quick-rate sheet. */}
+            <SkillTagChips
+              groups={skillTagGroups}
+              selected={tagsDraft}
+              onToggle={toggleTagDraft}
+            />
 
             {/* Mark for review — captain revisits on the dashboard later */}
             <TouchableOpacity

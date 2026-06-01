@@ -6,6 +6,7 @@
 // whole dashboard.
 
 import { supabase } from "./supabase";
+import { localDateString } from "./date";
 import { playerColorForIndex } from "./athlete";
 import { sideForPositions } from "../constants/positions";
 import { normalizeCategory, type CategoryKey } from "../constants/categories";
@@ -166,14 +167,6 @@ function sundayWeekKey(d: Date): string {
   return `${s.getUTCFullYear()}-${String(s.getUTCMonth() + 1).padStart(2, "0")}-${String(s.getUTCDate()).padStart(2, "0")}`;
 }
 
-function todayLocalISODate(): string {
-  // YYYY-MM-DD in local time — matches how practice_date is stored.
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
-    d.getDate()
-  ).padStart(2, "0")}`;
-}
-
 function emptyCategoryCounts(): Record<CategoryKey, number> {
   // Init all canonical category keys to zero so the donut renders correctly
   // even when only one category has been used.
@@ -199,7 +192,7 @@ function emptyCategoryCounts(): Record<CategoryKey, number> {
 // ─── Fetchers ──────────────────────────────────────────────────────────
 
 export async function fetchNextPractice(teamId: string): Promise<NextPractice> {
-  const today = todayLocalISODate();
+  const today = localDateString();
 
   const { data: planRow, error } = await supabase
     .from("practice_plans")

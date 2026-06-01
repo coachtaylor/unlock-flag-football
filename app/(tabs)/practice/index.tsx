@@ -28,6 +28,7 @@ import { fontStyle, MonoText } from "../../../constants/typography";
 import { colorForCategory, inferCategoryType } from "../../../constants/categories";
 import { supabase } from "../../../lib/supabase";
 import { useTeam } from "../../../lib/team-context";
+import { localDateString } from "../../../lib/date";
 
 const PADH = spacing.lg; // 16 — content column padding
 
@@ -103,13 +104,6 @@ function isPastDue(
     dueMs = new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
   }
   return now - dueMs > PAST_DUE_GRACE_MS;
-}
-
-function todayIso(): string {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${m}-${day}`;
 }
 
 function dateParts(iso: string) {
@@ -1495,7 +1489,7 @@ export default function PracticeListScreen() {
         .insert({
           team_id: teamId,
           created_by: auth.user?.id,
-          practice_date: todayIso(), // a fresh date — the original's is not copied
+          practice_date: localDateString(), // a fresh date — the original's is not copied
           title: (orig as { title: string | null }).title,
           notes: (orig as { notes: string | null }).notes,
           status: "draft",

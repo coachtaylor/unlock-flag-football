@@ -9,6 +9,21 @@ import type { SkillGroup } from "../constants/skill-groups";
 
 export type { SkillGroup };
 
+// Generic fallback chips for the observation / quick-rate flows — used only
+// when a drill has no drill_skills wired up. Once a drill is tagged (or cloned
+// from the preset library) the skill-aware chip groups take over. These toggle
+// benchmark_results.tags[] (text[]). Single source of truth: the benchmark log
+// and the mid-practice quick-rate sheet both render these.
+export const FALLBACK_SKILL_TAGS = [
+  "Good hands",
+  "Quick feet",
+  "Needs footwork help",
+  "Sharp routes",
+  "Slow reaction",
+  "Strong arm",
+  "Good vision",
+];
+
 export type Skill = {
   id: string;
   slug: string;

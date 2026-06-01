@@ -36,6 +36,13 @@ import {
 import { blockFillColor } from "../../../../constants/block-colors";
 import { supabase } from "../../../../lib/supabase";
 import { useAuth } from "../../../../lib/auth-context";
+import { localDateString } from "../../../../lib/date";
+import { loadBenchmarkSkillTags, type SkillTagGroup } from "../../../../lib/skills";
+import { PlayerAvatar } from "../../../../components/ui/PlayerAvatar";
+import {
+  QuickRateSheet,
+  type QuickRatePlayer,
+} from "../../../../components/practice/QuickRateSheet";
 
 type RunStatus = "planned" | "active" | "done" | "skipped";
 
@@ -265,6 +272,9 @@ function NowRunningCard({
   onComplete,
   onSkip,
   onStartAssessment,
+  presentPlayers = [],
+  ratedPlayerIds,
+  onRatePlayer,
   gated = false,
 }: {
   block: RunDrill[] | null;
@@ -281,6 +291,13 @@ function NowRunningCard({
   // drill. Routes to the upcoming benchmark-capture flow; today it stubs
   // with an Alert until that screen ships.
   onStartAssessment?: (block: RunDrill[]) => void;
+  // Present players (attendance) — surfaced as quick-rate chips on the live
+  // drill so a captain can capture a 1-5 mid-drill. Empty when nobody's
+  // checked in or the active item has no underlying drill.
+  presentPlayers?: QuickRatePlayer[];
+  // Player ids already quick-rated on the active drill today (checkmark).
+  ratedPlayerIds?: Set<string>;
+  onRatePlayer?: (player: QuickRatePlayer) => void;
   // True while the overall practice timer hasn't been started yet. Strips the
   // drill timer + Mark complete + Skip controls and shows a "LOCKED" helper
   // so coaches only have one primary action on screen (Start practice timer).
@@ -659,6 +676,75 @@ function NowRunningCard({
         </View>
       ) : null}
 
+      {/* Quick-rate players (Build 14d) — present players as tappable chips.
+          Tap → bottom sheet to capture a 1-5 + skill tags + note for this
+          drill. Only on a live drill (post-start) that has an underlying
+          team_drills row and at least one checked-in player. */}
+      {!gated && head.drillId && presentPlayers.length > 0 ? (
+        <View style={{ marginTop: spacing.md, gap: spacing.sm }}>
+          <Text
+            style={[
+              fontStyle("bold"),
+              {
+                fontSize: 9.5,
+                letterSpacing: 1,
+                color: colors.text.secondary,
+              },
+            ]}
+          >
+            RATE A PLAYER
+          </Text>
+          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
+            {presentPlayers.map((p) => {
+              const rated = ratedPlayerIds?.has(p.id) ?? false;
+              return (
+                <TouchableOpacity
+                  key={p.id}
+                  onPress={() => onRatePlayer?.(p)}
+                  activeOpacity={0.7}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 6,
+                    paddingLeft: 6,
+                    paddingRight: 11,
+                    paddingVertical: 5,
+                    borderRadius: radius.pill,
+                    backgroundColor: rated
+                      ? colors.lime.tint
+                      : colors.surface.overlay,
+                    borderWidth: 1,
+                    borderColor: rated
+                      ? colors.lime[400]
+                      : colors.border.card,
+                  }}
+                >
+                  <PlayerAvatar name={p.name} colorIndex={p.colorIndex} size={22} />
+                  <Text
+                    style={[
+                      fontStyle("semibold"),
+                      {
+                        fontSize: 13,
+                        color: rated ? colors.lime[400] : colors.text.primary,
+                      },
+                    ]}
+                  >
+                    {p.name}
+                  </Text>
+                  {rated ? (
+                    <Ionicons
+                      name="checkmark-circle"
+                      size={14}
+                      color={colors.lime[400]}
+                    />
+                  ) : null}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
+
       {/* Gated state — single helper line, no timer or buttons */}
       {gated ? (
         <View
@@ -926,6 +1012,17 @@ export default function RunPracticeScreen() {
   const [pausedAccumMs, setPausedAccumMs] = useState(0);
   const [pauseStartedAt, setPauseStartedAt] = useState<number | null>(null);
 
+  // Quick-rate (Build 14d): present players, the active drill's skill-tag
+  // chips, which (drillId → playerIds) were already quick-rated today, and the
+  // open sheet's target player.
+  const [presentPlayers, setPresentPlayers] = useState<QuickRatePlayer[]>([]);
+  const [quickRated, setQuickRated] = useState<Record<string, Set<string>>>({});
+  const [activeDrillSkillTags, setActiveDrillSkillTags] = useState<
+    SkillTagGroup[]
+  >([]);
+  const [rateTarget, setRateTarget] = useState<QuickRatePlayer | null>(null);
+  const [rateSheetOpen, setRateSheetOpen] = useState(false);
+
   // 1-second tick drives both the overall and the active-drill timers.
   useEffect(() => {
     const t = setInterval(() => setNowTs(Date.now()), 1000);
@@ -1132,14 +1229,19 @@ export default function RunPracticeScreen() {
 
       const teamId = planData.team_id as string;
 
-      // Check-in (roster + practice_plan_attendees) is loaded on the plan
-      // detail page now — this screen only needs notes for the run.
-      const [notesRes] = await Promise.all([
+      // Notes for the run, plus the checked-in players (set on the plan detail
+      // page during prep) so the live drill can offer quick-rate chips.
+      const [notesRes, attendeesRes] = await Promise.all([
         supabase
           .from("practice_notes")
           .select("id, note_text, tag, drill_label, created_at")
           .eq("practice_plan_id", id)
           .order("created_at", { ascending: false }),
+        supabase
+          .from("practice_plan_attendees")
+          .select("player_id")
+          .eq("practice_plan_id", id)
+          .eq("attended", true),
       ]);
 
       if (cancelled) return;
@@ -1151,6 +1253,41 @@ export default function RunPracticeScreen() {
         drillLabel: (n.drill_label as string | null) ?? null,
         createdAt: n.created_at as string,
       }));
+
+      // Hydrate present players from the roster (name + identity color).
+      const presentIds = (attendeesRes.data ?? []).map(
+        (a) => a.player_id as string
+      );
+      let present: QuickRatePlayer[] = [];
+      if (presentIds.length > 0) {
+        // color_index landed in migration 45 — fall back without it on older
+        // DBs. The IIFE annotation casts the result loose so the typed select
+        // parser doesn't choke on the conditional column string.
+        const playersRes = await (async (): Promise<{
+          data: any[] | null;
+          error: { message: string } | null;
+        }> => {
+          const sel = (withColor: boolean) =>
+            supabase
+              .from("team_players")
+              .select(`id, player_name${withColor ? ", color_index" : ""}`)
+              .in("id", presentIds);
+          let res = await sel(true);
+          if (res.error && /color_index/i.test(res.error.message)) {
+            res = await sel(false);
+          }
+          return res;
+        })();
+        if (!cancelled) {
+          present = (playersRes.data ?? []).map((p) => ({
+            id: p.id as string,
+            name: p.player_name as string,
+            colorIndex: (p.color_index as number | null) ?? null,
+          }));
+        }
+      }
+      if (cancelled) return;
+      setPresentPlayers(present);
 
       setPlan({
         id: planData.id as string,
@@ -1214,6 +1351,59 @@ export default function RunPracticeScreen() {
   const totalPlannedMin = blocks.reduce(
     (s, b) => s + (b[0].durationMinutes ?? 0),
     0
+  );
+
+  // The active drill's underlying team_drills id — drives the quick-rate sheet's
+  // skill chips and the rated-today badges.
+  const activeDrillId = activeBlock?.[0]?.drillId ?? null;
+  const teamId = plan?.teamId ?? null;
+
+  // When the active drill changes, load its skill-tag chip groups and hydrate
+  // which players were already quick-rated on it today (so chips show a
+  // checkmark even after a reload or if a co-captain logged earlier).
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeDrillId || !teamId) {
+      setActiveDrillSkillTags([]);
+      return;
+    }
+    (async () => {
+      const [tagGroups, ratedRes] = await Promise.all([
+        loadBenchmarkSkillTags(activeDrillId),
+        supabase
+          .from("benchmark_results")
+          .select("player_id")
+          .eq("team_id", teamId)
+          .eq("drill_id", activeDrillId)
+          .eq("assessment_date", localDateString())
+          .eq("entry_mode", "practice_quick"),
+      ]);
+      if (cancelled) return;
+      setActiveDrillSkillTags(tagGroups);
+      const ids = new Set((ratedRes.data ?? []).map((r) => r.player_id as string));
+      setQuickRated((prev) => ({ ...prev, [activeDrillId]: ids }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeDrillId, teamId]);
+
+  const openRate = useCallback((player: QuickRatePlayer) => {
+    lightHaptic();
+    setRateTarget(player);
+    setRateSheetOpen(true);
+  }, []);
+
+  const onQuickRateSaved = useCallback(
+    (playerId: string) => {
+      if (!activeDrillId) return;
+      setQuickRated((prev) => {
+        const next = new Set(prev[activeDrillId] ?? []);
+        next.add(playerId);
+        return { ...prev, [activeDrillId]: next };
+      });
+    },
+    [activeDrillId]
   );
 
   // --- Start practice timer (overall practice clock) ----------------------
@@ -1970,6 +2160,11 @@ export default function RunPracticeScreen() {
           onComplete={(b) => advanceBlock(b, "done")}
           onSkip={(b) => advanceBlock(b, "skipped")}
           onStartAssessment={startAssessment}
+          presentPlayers={presentPlayers}
+          ratedPlayerIds={
+            activeDrillId ? quickRated[activeDrillId] : undefined
+          }
+          onRatePlayer={openRate}
           gated={!timerArmed}
         />
 
@@ -2453,6 +2648,21 @@ export default function RunPracticeScreen() {
       />
 
       <ActionModal {...modalProps} />
+
+      {/* Mid-practice quick-rate sheet (Build 14d) */}
+      {plan && user && activeDrillId ? (
+        <QuickRateSheet
+          open={rateSheetOpen}
+          onClose={() => setRateSheetOpen(false)}
+          player={rateTarget}
+          drillId={activeDrillId}
+          drillName={activeBlock?.[0]?.drillName ?? "Drill"}
+          teamId={plan.teamId}
+          assessedBy={user.id}
+          skillTagGroups={activeDrillSkillTags}
+          onSaved={onQuickRateSaved}
+        />
+      ) : null}
     </KeyboardAvoidingView>
   );
 }
