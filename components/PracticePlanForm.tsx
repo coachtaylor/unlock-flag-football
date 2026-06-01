@@ -2659,6 +2659,7 @@ function DrillPickerModal({
   onAdd,
   onRemove,
   onCreateNew,
+  onBrowsePresets,
   pairMode,
   onPick,
 }: {
@@ -2670,6 +2671,9 @@ function DrillPickerModal({
   onAdd: (drillId: string) => void;
   onRemove: (drillId: string) => void;
   onCreateNew: () => void;
+  // Open the preset library to add curated drills to the team. Omitted in
+  // pair mode (you pair existing drills, not browse presets).
+  onBrowsePresets?: () => void;
   pairMode?: boolean;
   onPick?: (drillId: string) => void;
 }) {
@@ -2829,20 +2833,42 @@ function DrillPickerModal({
               </Text>
             ) : null}
           </View>
-          <TouchableOpacity
-            onPress={onCreateNew}
-            hitSlop={12}
-            accessibilityLabel="Create new drill"
-            activeOpacity={0.6}
-            style={{
-              width: 36,
-              height: 36,
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <Ionicons name="add" size={24} color={colors.orange[500]} />
-          </TouchableOpacity>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.xs }}>
+            {!pairMode && onBrowsePresets ? (
+              <TouchableOpacity
+                onPress={onBrowsePresets}
+                hitSlop={12}
+                accessibilityLabel="Browse preset library"
+                activeOpacity={0.6}
+                style={{
+                  width: 36,
+                  height: 36,
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Ionicons
+                  name="albums-outline"
+                  size={22}
+                  color={colors.orange[500]}
+                />
+              </TouchableOpacity>
+            ) : null}
+            <TouchableOpacity
+              onPress={onCreateNew}
+              hitSlop={12}
+              accessibilityLabel="Create new drill"
+              activeOpacity={0.6}
+              style={{
+                width: 36,
+                height: 36,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Ionicons name="add" size={24} color={colors.orange[500]} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {drills.length === 0 ? (
@@ -3631,6 +3657,18 @@ export function PracticePlanForm({
     // push crossed tabs into the drills stack.
     const returnTo = encodeURIComponent(pathname);
     router.push(`/drills/new?returnTo=${returnTo}` as never);
+  };
+
+  // Open the preset library to add curated drills. Same return mechanism as
+  // create-new: close the picker, flag it to reopen on focus, and pass the
+  // current path so the library can route back here. Cloned presets arrive
+  // published + phased (migration 73), so they show up in the picker —
+  // grouped by phase — as soon as the form re-fetches drills on focus.
+  const handleBrowsePresets = () => {
+    setPickerOpen(false);
+    reopenPickerOnFocusRef.current = true;
+    const returnTo = encodeURIComponent(pathname);
+    router.push(`/drills/library?returnTo=${returnTo}` as never);
   };
 
   const drillsById = useMemo(() => {
@@ -5652,6 +5690,7 @@ export function PracticePlanForm({
         onAdd={(drillId) => addDrill(drillId)}
         onRemove={removeDrillById}
         onCreateNew={handleCreateNewDrill}
+        onBrowsePresets={handleBrowsePresets}
         pairMode={pairTargetId != null}
         onPick={handlePick}
       />

@@ -9,7 +9,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useFocusEffect, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Card } from "../../../components/ui/Card";
 import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
@@ -54,6 +54,23 @@ export default function PresetLibraryScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { teamId, teamName } = useTeam();
+
+  // When opened from the practice planner's "Add Drills" picker, the library
+  // is pushed with ?returnTo=<encoded practice form path>. Back then cross-tab
+  // navigates straight to the planner (router.back() would land on /drills,
+  // since the library lives in the drills tab) — mirrors the /drills/new flow.
+  const { returnTo } = useLocalSearchParams<{ returnTo?: string }>();
+  const decodedReturnTo =
+    typeof returnTo === "string" && returnTo.length > 0
+      ? decodeURIComponent(returnTo)
+      : null;
+  const handleBack = useCallback(() => {
+    if (decodedReturnTo && decodedReturnTo.startsWith("/")) {
+      router.navigate(decodedReturnTo as never);
+    } else {
+      router.back();
+    }
+  }, [decodedReturnTo, router]);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -190,7 +207,7 @@ export default function PresetLibraryScreen() {
         >
           <View style={{ flexDirection: "row", gap: spacing.md, flexShrink: 1 }}>
             <TouchableOpacity
-              onPress={() => router.back()}
+              onPress={handleBack}
               activeOpacity={0.7}
               hitSlop={8}
               accessibilityLabel="Back"
