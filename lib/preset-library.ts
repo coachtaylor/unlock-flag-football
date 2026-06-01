@@ -171,6 +171,29 @@ export async function clonePresetDrill(
 
 export type RemoveCloneResult = { ok: true } | { ok: false; error: string };
 
+// Turn a Postgres FK-violation (23503) on team_drills delete into a friendly,
+// actionable message. The data tables (benchmark_results, practice_plan_drills)
+// keep their no-cascade FKs on purpose, so removing a drill that has real data
+// is blocked — tell the coach why instead of leaking the raw constraint text.
+// Shared verbatim with the web copy (unlock-web preset-library-data.ts).
+export function friendlyRemoveCloneError(error: {
+  code?: string;
+  message?: string;
+  details?: string;
+}): string {
+  const haystack = `${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
+  if (error.code === "23503" || haystack.includes("foreign key")) {
+    if (haystack.includes("benchmark_results")) {
+      return "This drill has benchmark results logged. Archive it instead of removing it from the library.";
+    }
+    if (haystack.includes("practice_plan_drills")) {
+      return "This drill is used in a practice plan. Remove it from the plan first, then remove it from the library.";
+    }
+    return "This drill has linked data and can't be removed from the library.";
+  }
+  return error.message ?? "Couldn't remove the drill.";
+}
+
 /**
  * Remove this team's clone of a preset from the team library. Deletes the
  * team_drills row (same hard-delete the drill library / drill detail uses) —
@@ -182,6 +205,6 @@ export async function removeClonedDrill(
 ): Promise<RemoveCloneResult> {
   if (!drillId) return { ok: false, error: "Missing drill id." };
   const { error } = await supabase.from("team_drills").delete().eq("id", drillId);
-  if (error) return { ok: false, error: error.message };
+  if (error) return { ok: false, error: friendlyRemoveCloneError(error) };
   return { ok: true };
 }
