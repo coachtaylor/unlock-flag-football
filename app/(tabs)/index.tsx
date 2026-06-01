@@ -58,6 +58,7 @@ import { Spark } from "../../components/ui/Spark";
 import { StreakRow } from "../../components/ui/StreakRow";
 import { CATEGORY_COLORS, type CategoryKey } from "../../constants/categories";
 import { CaptainViewToggle } from "../../components/dashboard/CaptainViewToggle";
+import { NeedsReviewLink } from "../../components/benchmark/NeedsReviewLink";
 
 // ─────────────────────────────────────────────────────────────────────
 // Formatting helpers
@@ -606,6 +607,9 @@ export default function DashboardScreen() {
               nextPractice && navigate(`/practice/${nextPractice.practice_plan_id}`)
             }
           />
+
+          {/* Needs-review backlog (Build 14f) — only renders when > 0. */}
+          <NeedsReviewLink teamId={teamId} style={{ marginTop: 12 }} />
 
           <SectionEyebrow
             label="Team Pulse"

@@ -29,6 +29,7 @@ import {
 import { initialsFromName, playerColorForIndex } from "../../lib/athlete";
 import { supabase } from "../../lib/supabase";
 import { useTeam } from "../../lib/team-context";
+import { NeedsReviewLink } from "../../components/benchmark/NeedsReviewLink";
 import {
   DEFAULT_SETS_PER_PLAYER,
   filterPlayersByGroup,
@@ -625,6 +626,9 @@ export default function BenchmarksHubScreen() {
         }}
         keyboardShouldPersistTaps="handled"
       >
+        {/* Needs-review backlog (Build 14f) — only renders when > 0. */}
+        <NeedsReviewLink teamId={teamId} />
+
         {/* 01 · DRILL */}
         <Section>
           <NumberedEyebrow index="01" label="Drill" />

@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
-import type { BenchmarkType } from "../constants/benchmarks";
+import { BENCHMARK_TYPE_META, type BenchmarkType } from "../constants/benchmarks";
+import { localDateString } from "./date";
 
 // Shared write path for benchmark_results. Single source of truth — both the
 // formal benchmark-log flow (app/benchmarks/log.tsx) and the mid-practice
@@ -94,4 +95,156 @@ export async function upsertBenchmarkResult(
   }
   const { error } = await supabase.from("benchmark_results").insert(row);
   return { error };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Needs-review queue (Build 14f — mobile port of web Build 11's queue half).
+// Captains flag an assessment as "needs more detail" while logging (14c) or
+// mid-practice (14d, default on); this is the backlog they revisit. Capped to
+// the last 30 days so it stays scannable (matches the web badge logic).
+// ─────────────────────────────────────────────────────────────────────────
+
+// One flagged benchmark_results row, hydrated with drill + player names and a
+// display-ready value, for the review queue screen.
+export type NeedsReviewEntry = {
+  id: string;
+  drillId: string;
+  drillName: string;
+  playerName: string;
+  benchmarkType: BenchmarkType | null;
+  value: string;
+  assessmentDate: string;
+  capturedOn: string; // 'mobile' | 'desktop'
+  entryMode: string; // 'benchmark' | 'practice_quick' | 'self_report'
+  tags: string[];
+  notes: string | null;
+};
+
+// Local YYYY-MM-DD cutoff, `days` ago — the queue + badge both window here.
+function reviewCutoff(days = 30): string {
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return localDateString(d);
+}
+
+// Format a result row's metric the way the queue shows it. Mirrors the web
+// formatValue (units come from BENCHMARK_TYPE_META so the two stay in step).
+function formatReviewValue(row: {
+  benchmark_type: string | null;
+  time_seconds: number | null;
+  rating: number | null;
+  made_count: number | null;
+  attempts_count: number | null;
+}): string {
+  const type = (row.benchmark_type as BenchmarkType | null) ?? null;
+  if (!type) return "—";
+  const unit = BENCHMARK_TYPE_META[type]?.unit ?? "";
+  if (type === "timed") {
+    return row.time_seconds != null ? `${Number(row.time_seconds).toFixed(2)}${unit}` : "—";
+  }
+  if (type === "rated") {
+    return row.rating != null ? `${row.rating}${unit}` : "—";
+  }
+  if (type === "pct") {
+    if (row.made_count == null || row.attempts_count == null) return "—";
+    const pct = row.attempts_count
+      ? Math.round((row.made_count / row.attempts_count) * 100)
+      : 0;
+    return `${row.made_count}/${row.attempts_count} (${pct}%)`;
+  }
+  return row.made_count != null ? `${row.made_count}${unit}` : "—";
+}
+
+/**
+ * Count flagged entries for the team in the last 30 days — the badge number on
+ * the dashboard + benchmarks hub. Lightweight (head + exact count, no rows).
+ * Returns 0 on error so the badge just hides.
+ */
+export async function countNeedsReview(teamId: string): Promise<number> {
+  if (!teamId) return 0;
+  const { count, error } = await supabase
+    .from("benchmark_results")
+    .select("id", { count: "exact", head: true })
+    .eq("team_id", teamId)
+    .eq("needs_review", true)
+    .gte("assessment_date", reviewCutoff());
+  if (error) {
+    console.warn("[needs-review] count error:", error.message);
+    return 0;
+  }
+  return count ?? 0;
+}
+
+/**
+ * Load the flagged-entries queue (last 30 days), newest first, hydrated with
+ * drill + player names via two small lookups (keeps RLS simple). Returns []
+ * (never throws) so the screen renders its empty state on any failure.
+ */
+export async function loadNeedsReviewQueue(
+  teamId: string
+): Promise<NeedsReviewEntry[]> {
+  if (!teamId) return [];
+  const { data, error } = await supabase
+    .from("benchmark_results")
+    .select(
+      "id, drill_id, player_id, benchmark_type, rating, time_seconds, made_count, attempts_count, tags, notes, assessment_date, created_at, captured_on, entry_mode"
+    )
+    .eq("team_id", teamId)
+    .eq("needs_review", true)
+    .gte("assessment_date", reviewCutoff())
+    .order("assessment_date", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) {
+    console.warn("[needs-review] queue error:", error.message);
+    return [];
+  }
+  const rows = data ?? [];
+  if (rows.length === 0) return [];
+
+  const drillIds = Array.from(new Set(rows.map((r) => r.drill_id as string)));
+  const playerIds = Array.from(new Set(rows.map((r) => r.player_id as string)));
+  const [drillsRes, playersRes] = await Promise.all([
+    supabase.from("team_drills").select("id, drill_name").in("id", drillIds),
+    supabase.from("team_players").select("id, player_name").in("id", playerIds),
+  ]);
+  const drillNameById = new Map(
+    (drillsRes.data ?? []).map((d) => [d.id as string, d.drill_name as string])
+  );
+  const playerNameById = new Map(
+    (playersRes.data ?? []).map((p) => [p.id as string, p.player_name as string])
+  );
+
+  return rows.map((r) => ({
+    id: r.id as string,
+    drillId: r.drill_id as string,
+    drillName: drillNameById.get(r.drill_id as string) ?? "Drill",
+    playerName: playerNameById.get(r.player_id as string) ?? "Player",
+    benchmarkType: (r.benchmark_type as BenchmarkType | null) ?? null,
+    value: formatReviewValue(r),
+    assessmentDate: r.assessment_date as string,
+    capturedOn: (r.captured_on as string | null) ?? "mobile",
+    entryMode: (r.entry_mode as string | null) ?? "benchmark",
+    tags: ((r.tags as string[] | null) ?? []) as string[],
+    notes: (r.notes as string | null) ?? null,
+  }));
+}
+
+export type ClearReviewResult = { ok: true } | { ok: false; error: string };
+
+/**
+ * Clear the needs_review flag on one row. RLS already scopes writes to the
+ * user's team(s); the team_id filter is a belt-and-suspenders guard.
+ */
+export async function clearNeedsReview(
+  resultId: string,
+  teamId: string
+): Promise<ClearReviewResult> {
+  if (!resultId || !teamId) return { ok: false, error: "Missing id." };
+  const { error } = await supabase
+    .from("benchmark_results")
+    .update({ needs_review: false })
+    .eq("id", resultId)
+    .eq("team_id", teamId);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
 }
