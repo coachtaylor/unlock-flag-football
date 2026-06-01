@@ -25,6 +25,9 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "../../../../components/ui/Button";
 import { Eyebrow } from "../../../../components/ui/Eyebrow";
+import { Byline } from "../../../../components/ui/Byline";
+import { EntityHistorySheet } from "../../../../components/activity/EntityHistorySheet";
+import { resolveActorName } from "../../../../lib/activity";
 import { PastDueModal } from "../../../../components/ui/PastDueModal";
 import { DeleteConfirmModal } from "../../../../components/ui/DeleteConfirmModal";
 import { ActionModal, useActionModal } from "../../../../components/ui/ActionModal";
@@ -501,6 +504,9 @@ export default function PracticePlanDetailScreen() {
 
   const [loading, setLoading] = useState(true);
   const [plan, setPlan] = useState<Plan | null>(null);
+  const [planEditorName, setPlanEditorName] = useState<string | null>(null);
+  const [planEditorVerb, setPlanEditorVerb] = useState<"Updated" | "Created">("Created");
+  const [planEditorAt, setPlanEditorAt] = useState<string | null>(null);
   // Shown when arriving from a "Needs Attention" card (?pastdue=1). Lets the
   // coach reschedule, log, or delete the stale practice.
   const [pastDueOpen, setPastDueOpen] = useState(pastdue === "1");
@@ -538,7 +544,8 @@ export default function PracticePlanDetailScreen() {
     const planSelect = (
       withExtras: boolean,
       withBlocks: boolean,
-      withBreaks: boolean
+      withBreaks: boolean,
+      withAttribution: boolean
     ) => {
       const drillCols = `id, drill_id, drill_order, duration_minutes, is_water_break${
         withExtras ? ", parallel_group, log_note" : ""
@@ -549,33 +556,43 @@ export default function PracticePlanDetailScreen() {
       const breakJoin = withBreaks
         ? ", practice_plan_breaks(id, after_block_order, break_order, duration_minutes)"
         : "";
+      // Build 14.5 attribution columns — dropped on projects without mig 75.
+      const attribCols = withAttribution
+        ? ", created_by, updated_by, created_at, updated_at"
+        : "";
       return supabase
         .from("practice_plans")
         .select(
-          `id, team_id, practice_date, start_time, end_time, title, status, notes, practice_plan_drills(${drillCols})${blockJoin}${breakJoin}`
+          `id, team_id, practice_date, start_time, end_time, title, status, notes${attribCols}, practice_plan_drills(${drillCols})${blockJoin}${breakJoin}`
         )
         .eq("id", id)
         .maybeSingle();
     };
     // Degrade gracefully if newer schema bits aren't deployed yet.
-    let planRes = await planSelect(true, true, true);
+    let planRes = await planSelect(true, true, true, true);
+    if (
+      planRes.error &&
+      /created_by|updated_by|created_at|updated_at/i.test(planRes.error.message)
+    ) {
+      planRes = await planSelect(true, true, true, false);
+    }
     if (
       planRes.error &&
       /practice_plan_breaks/i.test(planRes.error.message)
     ) {
-      planRes = await planSelect(true, true, false);
+      planRes = await planSelect(true, true, false, false);
     }
     if (
       planRes.error &&
       /practice_plan_blocks|plan_block_id/i.test(planRes.error.message)
     ) {
-      planRes = await planSelect(true, false, false);
+      planRes = await planSelect(true, false, false, false);
     }
     if (
       planRes.error &&
       /parallel_group|log_note/i.test(planRes.error.message)
     ) {
-      planRes = await planSelect(false, false, false);
+      planRes = await planSelect(false, false, false, false);
     }
 
     if (planRes.error) {
@@ -754,6 +771,17 @@ export default function PracticePlanDetailScreen() {
       blocks: blockSummaries,
       breaks: breakSummaries,
     });
+
+    // Attribution byline (Build 14.5): last editor, falling back to creator.
+    const pUpdatedBy = (planData.updated_by as string | null) ?? null;
+    const pCreatedBy = (planData.created_by as string | null) ?? null;
+    setPlanEditorVerb(pUpdatedBy ? "Updated" : "Created");
+    setPlanEditorAt(
+      (planData.updated_at as string | null) ??
+        (planData.created_at as string | null) ??
+        null
+    );
+    resolveActorName(pUpdatedBy ?? pCreatedBy).then(setPlanEditorName);
 
     // Roster + attendance load for ALL statuses (was previously gated to
     // 'completed' only for the post-practice modal). The detail page now
@@ -1437,6 +1465,12 @@ export default function PracticePlanDetailScreen() {
           >
             {metaLine}
           </Text>
+        ) : null}
+        {planEditorName ? (
+          <View style={{ marginTop: spacing.xs, flexDirection: "row", alignItems: "center", gap: spacing.md, flexWrap: "wrap" }}>
+            <Byline who={planEditorName} verb={planEditorVerb} at={planEditorAt} />
+            <EntityHistorySheet entityType="practice_plan" entityId={plan.id} />
+          </View>
         ) : null}
         <View className="flex-row" style={{ marginTop: spacing.md }}>
           <StatusBadge status={plan.status} />

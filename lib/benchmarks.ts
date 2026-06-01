@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import { BENCHMARK_TYPE_META, type BenchmarkType } from "../constants/benchmarks";
 import { localDateString } from "./date";
+import { resolveActorNames } from "./activity";
 
 // Shared write path for benchmark_results. Single source of truth — both the
 // formal benchmark-log flow (app/benchmarks/log.tsx) and the mid-practice
@@ -116,6 +117,7 @@ export type NeedsReviewEntry = {
   assessmentDate: string;
   capturedOn: string; // 'mobile' | 'desktop'
   entryMode: string; // 'benchmark' | 'practice_quick' | 'self_report'
+  assessorName: string | null; // who logged it (Build 14.5) — calibration signal
   tags: string[];
   notes: string | null;
 };
@@ -187,7 +189,7 @@ export async function loadNeedsReviewQueue(
   const { data, error } = await supabase
     .from("benchmark_results")
     .select(
-      "id, drill_id, player_id, benchmark_type, rating, time_seconds, made_count, attempts_count, tags, notes, assessment_date, created_at, captured_on, entry_mode"
+      "id, drill_id, player_id, benchmark_type, rating, time_seconds, made_count, attempts_count, tags, notes, assessment_date, created_at, captured_on, entry_mode, assessed_by"
     )
     .eq("team_id", teamId)
     .eq("needs_review", true)
@@ -203,9 +205,11 @@ export async function loadNeedsReviewQueue(
 
   const drillIds = Array.from(new Set(rows.map((r) => r.drill_id as string)));
   const playerIds = Array.from(new Set(rows.map((r) => r.player_id as string)));
-  const [drillsRes, playersRes] = await Promise.all([
+  const [drillsRes, playersRes, assessorNameById] = await Promise.all([
     supabase.from("team_drills").select("id, drill_name").in("id", drillIds),
     supabase.from("team_players").select("id, player_name").in("id", playerIds),
+    // Who logged each flagged assessment (Build 14.5) — calibration signal.
+    resolveActorNames(rows.map((r) => (r.assessed_by as string | null) ?? null)),
   ]);
   const drillNameById = new Map(
     (drillsRes.data ?? []).map((d) => [d.id as string, d.drill_name as string])
@@ -224,6 +228,9 @@ export async function loadNeedsReviewQueue(
     assessmentDate: r.assessment_date as string,
     capturedOn: (r.captured_on as string | null) ?? "mobile",
     entryMode: (r.entry_mode as string | null) ?? "benchmark",
+    assessorName: r.assessed_by
+      ? assessorNameById.get(r.assessed_by as string) ?? null
+      : null,
     tags: ((r.tags as string[] | null) ?? []) as string[],
     notes: (r.notes as string | null) ?? null,
   }));

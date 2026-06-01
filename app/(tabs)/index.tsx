@@ -166,6 +166,8 @@ function weekTagFor(date: Date): string {
 function activityIcon(kind: Activity["kind"]): keyof typeof Ionicons.glyphMap {
   if (kind === "benchmark") return "flash-outline";
   if (kind === "drill") return "football-outline";
+  if (kind === "player") return "person-outline";
+  if (kind === "note") return "create-outline";
   return "flag-outline";
 }
 

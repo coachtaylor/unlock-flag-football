@@ -33,6 +33,8 @@ import {
   sideAccent,
 } from "../../../../constants/positions";
 import { fontStyle, MonoText } from "../../../../constants/typography";
+import { Byline } from "../../../../components/ui/Byline";
+import { resolveActorName } from "../../../../lib/activity";
 import {
   playerColorForIndex,
   initialsFromName,
@@ -115,6 +117,8 @@ export default function PlayerDetailScreen() {
   const [observations, setObservations] = useState<ObservationRow[]>([]);
   const [skillProfile, setSkillProfile] = useState<PlayerSkill[]>([]);
   const [busy, setBusy] = useState(false);
+  const [addedByName, setAddedByName] = useState<string | null>(null);
+  const [addedAt, setAddedAt] = useState<string | null>(null);
   // App-styled confirm/error modal (replaces native Alert.alert).
   const { show: showModal, showError, modalProps } = useActionModal();
 
@@ -123,24 +127,34 @@ export default function PlayerDetailScreen() {
 
     // Try the richest projection first; degrade if migration 43
     // (injury) or 45 (color_index) isn't applied.
-    const playerSelect = (withInjury: boolean, withColorIndex: boolean) =>
+    const playerSelect = (
+      withInjury: boolean,
+      withColorIndex: boolean,
+      withCreatedBy: boolean
+    ) =>
       supabase
         .from("team_players")
         .select(
           `id, player_name, positions, jersey_number, status, notes, is_captain${
-            withInjury ? ", is_injured, injury_note" : ""
-          }${withColorIndex ? ", color_index" : ""}`
+            withCreatedBy ? ", created_by, created_at" : ""
+          }${withInjury ? ", is_injured, injury_note" : ""}${
+            withColorIndex ? ", color_index" : ""
+          }`
         )
         .eq("id", id)
         .maybeSingle();
     const [playerResRaw, benchRes, notesRes, skillRes] = await Promise.all([
       (async () => {
-        let res = await playerSelect(true, true);
+        let res = await playerSelect(true, true, true);
+        // Build 14.5 attribution columns — drop if migration 75 isn't applied.
+        if (res.error && /created_by|created_at/i.test(res.error.message)) {
+          res = await playerSelect(true, true, false);
+        }
         if (res.error && /color_index/i.test(res.error.message)) {
-          res = await playerSelect(true, false);
+          res = await playerSelect(true, false, false);
         }
         if (res.error && /is_injured|injury_note/i.test(res.error.message)) {
-          res = await playerSelect(false, false);
+          res = await playerSelect(false, false, false);
         }
         return res;
       })(),
@@ -187,6 +201,9 @@ export default function PlayerDetailScreen() {
         colorIndex: (raw.color_index as number | null) ?? null,
         isCaptain: raw.is_captain === true,
       });
+      // Attribution byline: who added this player (Build 14.5).
+      setAddedAt((raw.created_at as string | null) ?? null);
+      resolveActorName((raw.created_by as string | null) ?? null).then(setAddedByName);
     } else {
       setPlayer(null);
     }
@@ -512,6 +529,11 @@ export default function PlayerDetailScreen() {
               style={{ width: 120 }}
             />
           </View>
+          {addedByName ? (
+            <View style={{ marginTop: 14 }}>
+              <Byline who={addedByName} verb="Added" at={addedAt} />
+            </View>
+          ) : null}
         </Section>
 
         {/* 02 Position (read-only) */}

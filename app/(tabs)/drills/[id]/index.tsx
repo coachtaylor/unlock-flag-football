@@ -25,6 +25,9 @@ import {
 } from "../../../../constants/categories";
 import { SKILL_GROUP_META } from "../../../../constants/skill-groups";
 import { loadDrillSkills, type TaggedSkill } from "../../../../lib/skills";
+import { resolveActorName } from "../../../../lib/activity";
+import { Byline } from "../../../../components/ui/Byline";
+import { EntityHistorySheet } from "../../../../components/activity/EntityHistorySheet";
 import { Button } from "../../../../components/ui/Button";
 import { ConfirmDialog } from "../../../../components/ui/ConfirmDialog";
 import { colors, radius, spacing } from "../../../../constants/design";
@@ -64,11 +67,19 @@ type DrillRow = {
   default_duration_min: number | null;
   is_dashboard_pinned?: boolean | null;
   team_drill_categories: { category_id: string }[] | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  created_by?: string | null;
+  updated_by?: string | null;
 };
 
 const PIN_CAP = 4;
 
 const DRILL_SELECT =
+  "id, team_id, drill_name, description, source_url, benchmark_type, benchmark_types, benchmark_scope, benchmark_config, status, setup_instructions, setup_diagram, equipment, default_reps, default_duration_min, is_dashboard_pinned, created_at, updated_at, created_by, updated_by, team_drill_categories(category_id)";
+// Same as DRILL_SELECT minus the Build 14.5 attribution columns, for projects
+// where migration 75 hasn't shipped (the byline just renders nothing there).
+const DRILL_SELECT_NO_ATTRIB =
   "id, team_id, drill_name, description, source_url, benchmark_type, benchmark_types, benchmark_scope, benchmark_config, status, setup_instructions, setup_diagram, equipment, default_reps, default_duration_min, is_dashboard_pinned, team_drill_categories(category_id)";
 const DRILL_SELECT_PRE_PIN =
   "id, team_id, drill_name, description, source_url, benchmark_type, benchmark_types, benchmark_scope, benchmark_config, status, setup_instructions, setup_diagram, equipment, default_reps, default_duration_min, team_drill_categories(category_id)";
@@ -92,6 +103,7 @@ export default function DrillDetailScreen() {
   const [drillSkills, setDrillSkills] = useState<TaggedSkill[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [editorName, setEditorName] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!id || !teamId) return;
@@ -103,8 +115,18 @@ export default function DrillDetailScreen() {
       .maybeSingle();
 
     // Schema-drift fallbacks: strip newer columns one tier at a time so this
-    // page keeps loading on environments where migration 40 / migration 38 /
+    // page keeps loading on environments where migration 75 / 40 / 38 /
     // migration 18 haven't shipped yet.
+    if (
+      res.error &&
+      /created_by|updated_by|created_at|updated_at/i.test(res.error.message)
+    ) {
+      res = await supabase
+        .from("team_drills")
+        .select(DRILL_SELECT_NO_ATTRIB)
+        .eq("id", id)
+        .maybeSingle();
+    }
     if (res.error && /is_dashboard_pinned/i.test(res.error.message)) {
       res = await supabase
         .from("team_drills")
@@ -149,6 +171,10 @@ export default function DrillDetailScreen() {
     const drillData = res.data as DrillRow;
     setDrill(drillData);
     setNotFound(false);
+
+    // Attribution byline: last editor, falling back to creator (Build 14.5).
+    const actorId = drillData.updated_by ?? drillData.created_by ?? null;
+    resolveActorName(actorId).then(setEditorName);
 
     const ids = Array.from(
       new Set<string>(
@@ -530,6 +556,16 @@ export default function DrillDetailScreen() {
               >
                 Drill name
               </Text>
+              {editorName ? (
+                <Byline
+                  who={editorName}
+                  verb={drill.updated_by ? "Updated" : "Created"}
+                  at={drill.updated_at ?? drill.created_at}
+                />
+              ) : null}
+              <View style={{ marginTop: 4 }}>
+                <EntityHistorySheet entityType="drill" entityId={drill.id} />
+              </View>
             </View>
           </View>
         </Section>

@@ -7,6 +7,7 @@
 
 import { supabase } from "./supabase";
 import { localDateString } from "./date";
+import { loadTeamActivity, type ActivityFeedItem } from "./activity";
 import { playerColorForIndex } from "./athlete";
 import { sideForPositions } from "../constants/positions";
 import { normalizeCategory, type CategoryKey } from "../constants/categories";
@@ -100,7 +101,12 @@ export type Attendance = {
   streaks: AttendanceStreak[];
 };
 
-export type ActivityKind = "benchmark" | "drill" | "practice";
+export type ActivityKind =
+  | "benchmark"
+  | "drill"
+  | "practice"
+  | "player"
+  | "note";
 
 export type Activity = {
   kind: ActivityKind;
@@ -841,89 +847,62 @@ function computeAttendance(rows: AttendanceRow[], cutoffISO: string): Attendance
   };
 }
 
+// entity_type → the feed's icon kind.
+function activityKindFor(entityType: ActivityFeedItem["entityType"]): ActivityKind {
+  switch (entityType) {
+    case "drill":
+      return "drill";
+    case "practice_plan":
+    case "practice_log":
+      return "practice";
+    case "player":
+      return "player";
+    case "note":
+      return "note";
+    default:
+      return "benchmark";
+  }
+}
+
+// Deep link for a feed row. Benchmarks/notes point at the player they're about
+// (their profile shows the history); practice_logs use the plan id from meta.
+function activityHrefFor(ev: ActivityFeedItem): string {
+  switch (ev.entityType) {
+    case "drill":
+      return `/drills/${ev.entityId}`;
+    case "player":
+      return `/roster/${ev.entityId}`;
+    case "benchmark":
+      return ev.subjectPlayerId ? `/roster/${ev.subjectPlayerId}` : `/benchmarks`;
+    case "practice_plan":
+      return `/practice/${ev.entityId}`;
+    case "practice_log": {
+      const pid = ev.meta?.practice_plan_id as string | undefined;
+      return pid ? `/practice/${pid}` : `/practice`;
+    }
+    case "note":
+      if (ev.subjectPlayerId) return `/roster/${ev.subjectPlayerId}`;
+      return `/practice`;
+    default:
+      return `/`;
+  }
+}
+
 export async function fetchActivity(
   teamId: string,
   limit: number = 3
 ): Promise<Activity[]> {
-  // Pull a small recent window from each event source, merge, sort, slice.
-  const since = new Date();
-  since.setUTCDate(since.getUTCDate() - 28);
-  const sinceISO = since.toISOString();
-
-  const [b, d, p] = await Promise.all([
-    supabase
-      .from("benchmark_results")
-      .select(
-        "id, created_at, drill_id, team_drills(drill_name), team_players(player_name)"
-      )
-      .eq("team_id", teamId)
-      .gte("created_at", sinceISO)
-      .order("created_at", { ascending: false })
-      .limit(limit),
-    supabase
-      .from("team_drills")
-      .select("id, drill_name, created_at")
-      .eq("team_id", teamId)
-      .eq("status", "published")
-      .gte("created_at", sinceISO)
-      .order("created_at", { ascending: false })
-      .limit(limit),
-    supabase
-      .from("practice_plans")
-      .select("id, title, practice_date, created_at, status")
-      .eq("team_id", teamId)
-      .gte("created_at", sinceISO)
-      .order("created_at", { ascending: false })
-      .limit(limit),
-  ]);
-
-  const items: Activity[] = [];
-
-  for (const r of b.data ?? []) {
-    const td = r.team_drills as
-      | { drill_name: string }
-      | { drill_name: string }[]
-      | null;
-    const tp = r.team_players as
-      | { player_name: string }
-      | { player_name: string }[]
-      | null;
-    const drill = Array.isArray(td) ? td[0] : td;
-    const player = Array.isArray(tp) ? tp[0] : tp;
-    items.push({
-      kind: "benchmark",
-      created_at: r.created_at,
-      title: `Benchmark logged · ${drill?.drill_name ?? "drill"}`,
-      detail: player?.player_name ?? "",
-      href: r.drill_id ? `/drills/${r.drill_id}` : `/benchmarks`,
-    });
-  }
-
-  for (const r of d.data ?? []) {
-    items.push({
-      kind: "drill",
-      created_at: r.created_at,
-      title: `Drill published · ${r.drill_name}`,
-      detail: "Available in library",
-      href: `/drills/${r.id}`,
-    });
-  }
-
-  for (const r of p.data ?? []) {
-    items.push({
-      kind: "practice",
-      created_at: r.created_at,
-      title:
-        r.status === "completed"
-          ? `Practice logged · ${r.title ?? r.practice_date}`
-          : `Practice planned · ${r.title ?? r.practice_date}`,
-      detail: r.practice_date,
-      href: `/practice/${r.id}`,
-    });
-  }
-
-  items.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-  return items.slice(0, limit);
+  // Read the canonical attribution log (Build 14.5) instead of merging per
+  // source. The actor leads the title — the old version never showed WHO did
+  // it (benchmark "detail" was the assessed player, not the assessor).
+  const events = await loadTeamActivity(teamId, { limit, sinceDays: 28 });
+  return events.map((ev) => ({
+    kind: activityKindFor(ev.entityType),
+    created_at: ev.createdAt,
+    title: `${ev.who} ${ev.verbLabel} ${ev.what}`.trim(),
+    detail: "",
+    href: activityHrefFor(ev),
+  }));
 }
 
 export async function fetchPrsThisWeek(

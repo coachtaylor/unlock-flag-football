@@ -39,7 +39,8 @@ function sourceLabel(entry: NeedsReviewEntry): string {
       ? "Self-report"
       : "Benchmark";
   const where = entry.capturedOn === "desktop" ? "Web" : "Mobile";
-  return `${mode} · ${where}`;
+  const by = entry.assessorName ? ` · by ${entry.assessorName}` : "";
+  return `${mode} · ${where}${by}`;
 }
 
 export default function ReviewQueueScreen() {
