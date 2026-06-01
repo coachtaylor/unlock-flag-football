@@ -39,6 +39,11 @@ import {
   splitFirstLast,
 } from "../../../../lib/athlete";
 import { supabase } from "../../../../lib/supabase";
+import { useTeam } from "../../../../lib/team-context";
+import {
+  PlayerSkillProfileCard,
+  type PlayerSkill,
+} from "../../../../components/PlayerSkillProfileCard";
 
 type Player = {
   id: string;
@@ -103,10 +108,12 @@ export default function PlayerDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
 
+  const { teamId } = useTeam();
   const [loading, setLoading] = useState(true);
   const [player, setPlayer] = useState<Player | null>(null);
   const [grouped, setGrouped] = useState<GroupedDrill[]>([]);
   const [observations, setObservations] = useState<ObservationRow[]>([]);
+  const [skillProfile, setSkillProfile] = useState<PlayerSkill[]>([]);
   const [busy, setBusy] = useState(false);
   // App-styled confirm/error modal (replaces native Alert.alert).
   const { show: showModal, showError, modalProps } = useActionModal();
@@ -126,7 +133,7 @@ export default function PlayerDetailScreen() {
         )
         .eq("id", id)
         .maybeSingle();
-    const [playerResRaw, benchRes, notesRes] = await Promise.all([
+    const [playerResRaw, benchRes, notesRes, skillRes] = await Promise.all([
       (async () => {
         let res = await playerSelect(true, true);
         if (res.error && /color_index/i.test(res.error.message)) {
@@ -150,6 +157,19 @@ export default function PlayerDetailScreen() {
         .select("id, note_text, created_at, practice_plans(title)")
         .eq("player_id", id)
         .order("created_at", { ascending: false }),
+      // Skill profile (Build 14e). v_player_skill_profile already scopes to
+      // skills the player has signal on (no position-bias filtering needed).
+      // Tolerate the view not existing yet (pre-taxonomy DBs) — fall back to
+      // an empty profile so the card shows its locked state instead of erroring.
+      teamId
+        ? supabase
+            .from("v_player_skill_profile")
+            .select(
+              "skill_id, skill_name, skill_group, composite_score, drill_sample_size"
+            )
+            .eq("player_id", id)
+            .eq("team_id", teamId)
+        : Promise.resolve({ data: [], error: null }),
     ]);
 
     const playerRes = playerResRaw;
@@ -221,7 +241,27 @@ export default function PlayerDetailScreen() {
       };
     });
     setObservations(obs);
-  }, [id]);
+
+    type SkillProfileRow = {
+      skill_id: string;
+      skill_name: string;
+      skill_group: PlayerSkill["skillGroup"];
+      composite_score: number | null;
+      drill_sample_size: number | null;
+    };
+    const profile: PlayerSkill[] = (
+      (skillRes.data as SkillProfileRow[] | null) ?? []
+    )
+      .filter((r) => r.composite_score != null)
+      .map((r) => ({
+        skillId: r.skill_id,
+        skillName: r.skill_name,
+        skillGroup: r.skill_group,
+        composite: Number(r.composite_score),
+        sampleSize: r.drill_sample_size ?? 0,
+      }));
+    setSkillProfile(profile);
+  }, [id, teamId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -599,8 +639,17 @@ export default function PlayerDetailScreen() {
           )}
         </Section>
 
+        {/* Skill profile — the per-player payoff: top skills + needs-work,
+            derived from rated benchmarks (Build 14e). */}
+        <Section idx="05" title="Skill Profile">
+          <PlayerSkillProfileCard
+            skills={skillProfile}
+            playerName={player.name}
+          />
+        </Section>
+
         {/* Benchmark history */}
-        <Section idx="05" title="Benchmark History">
+        <Section idx="06" title="Benchmark History">
           {grouped.length === 0 ? (
             <View
               style={{
