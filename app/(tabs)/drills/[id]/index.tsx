@@ -855,7 +855,7 @@ export default function DrillDetailScreen() {
           </View>
         </Section>
 
-        {/* Delete drill — inline link at the bottom of the page, not sticky */}
+        {/* Remove drill — inline link at the bottom of the page, not sticky */}
         <View
           style={{
             alignItems: "center",
@@ -867,7 +867,7 @@ export default function DrillDetailScreen() {
               setDeleteError(null);
               setConfirmDeleteOpen(true);
             }}
-            accessibilityLabel="Delete Drill"
+            accessibilityLabel="Remove Drill"
             hitSlop={10}
             activeOpacity={0.6}
           >
@@ -880,7 +880,7 @@ export default function DrillDetailScreen() {
                 },
               ]}
             >
-              Delete Drill
+              Remove Drill
             </Text>
           </TouchableOpacity>
         </View>
@@ -913,14 +913,14 @@ export default function DrillDetailScreen() {
         open={confirmDeleteOpen}
         onCancel={() => setConfirmDeleteOpen(false)}
         onConfirm={handleDelete}
-        title="Delete drill?"
+        title="Remove drill?"
         body={
           drill?.drill_name
             ? `"${drill.drill_name}" will be removed from your team library. This can't be undone.`
             : "This drill will be removed from your team library. This can't be undone."
         }
-        confirmLabel="Delete"
-        pendingLabel="Deleting…"
+        confirmLabel="Remove"
+        pendingLabel="Removing…"
         pending={deleting}
         error={deleteError}
       />
