@@ -17,6 +17,7 @@ import { Card } from "../../../components/ui/Card";
 import { Eyebrow } from "../../../components/ui/Eyebrow";
 import { HeaderIconButton } from "../../../components/ui/HeaderIconButton";
 import { SheetContainer, SheetSectionLabel } from "../../../components/ui/Sheet";
+import { SkillChip } from "../../../components/ui/SkillChip";
 import { PhaseChip } from "../../../components/DrillForm";
 import { colors, radius, spacing, tracking } from "../../../constants/design";
 import { fontStyle, monoStyle } from "../../../constants/typography";
@@ -28,11 +29,14 @@ import {
 } from "../../../constants/categories";
 import {
   SKILL_GROUP_META,
-  skillGroupMeta,
   type SkillGroup,
 } from "../../../constants/skill-groups";
+import {
+  BENCHMARK_TYPE_META,
+  type BenchmarkType,
+} from "../../../constants/benchmarks";
 import { supabase } from "../../../lib/supabase";
-import { loadDrillSkills } from "../../../lib/skills";
+import { loadDrillSkills, type TaggedSkill } from "../../../lib/skills";
 import { loadDrillCategories } from "../../../lib/load-categories";
 import { useTeam } from "../../../lib/team-context";
 import { useAuth } from "../../../lib/auth-context";
@@ -63,17 +67,28 @@ type BenchmarkKind =
 type Drill = {
   id: string;
   name: string;
+  description: string | null;
   status: "draft" | "published";
   benchmarkTypes: BenchmarkKind[];
   categoryIds: string[];
   categoryNames: string[];
   // Skill groups the drill develops (from the skill taxonomy), in canonical
-  // radar order. Powers the skill-group filter + row chips. Replaces the
-  // retired skill-category pills.
+  // radar order. Powers the skill-group filter + the scoreboard counts.
   skillGroups: SkillGroup[];
+  // The drill's tagged skills (primaries first) — rendered as named chips on
+  // the card, matching the preset library cards.
+  skills: TaggedSkill[];
   durationMin: number | null;
   reps: number | null;
   createdAt: string;
+  updatedAt: string;
+  // Benchmark history aggregates for the primary benchmark type — powers the
+  // latest/trend stat on the card and the latest/trend/runs sorts. null when
+  // the drill has no logged results.
+  primaryType: BenchmarkKind | null;
+  runs: number;
+  lastResult: number | null;
+  trend: number | null;
 };
 
 type StatusFilter = "all" | "draft" | "published";
@@ -84,7 +99,82 @@ type BenchmarkFilter =
   | "reps_complete"
   | "percentage"
   | "none";
-type SortOption = "name_asc" | "recent";
+// Card-grid sort axes (mirrors the web drill library sorts).
+type SortOption = "updated" | "name_asc" | "recent" | "last" | "trend" | "runs";
+
+// One benchmark_results row (the columns we read for list aggregates).
+type ResultRow = {
+  drill_id: string;
+  benchmark_type: string | null;
+  time_seconds: number | null;
+  rating: number | null;
+  made_count: number | null;
+  attempts_count: number | null;
+  created_at: string;
+};
+
+// Resolve a single numeric value for a result row based on its type
+// (mirrors the web drill library's resultValue).
+function resultValue(r: ResultRow): number | null {
+  switch (r.benchmark_type) {
+    case "timed":
+      return r.time_seconds != null ? Number(r.time_seconds) : null;
+    case "rated":
+    case "reps":
+    case "flags":
+    case "drops":
+      return r.rating != null ? Number(r.rating) : null;
+    case "pct": {
+      const m = r.made_count ?? 0;
+      const a = r.attempts_count ?? 0;
+      return a > 0 ? Math.round((m / a) * 100) : null;
+    }
+    default:
+      return null;
+  }
+}
+
+// Map the (possibly legacy) benchmark kind onto a BENCHMARK_TYPE_META key so
+// the card can show a unit + a sensible trend direction.
+const BENCH_META_KEY: Record<string, BenchmarkType> = {
+  timed: "timed",
+  rated: "rated",
+  reps: "reps",
+  reps_complete: "reps",
+  pct: "pct",
+  percentage: "pct",
+  flags: "flags",
+  drops: "drops",
+};
+
+function benchMetaFor(kind: BenchmarkKind | null) {
+  if (!kind) return null;
+  const key = BENCH_META_KEY[kind];
+  return key ? BENCHMARK_TYPE_META[key] : null;
+}
+
+// Lower-is-better types — used to color the trend delta.
+function isLowerBetter(kind: BenchmarkKind | null): boolean {
+  const key = kind ? BENCH_META_KEY[kind] : null;
+  return key === "timed" || key === "drops";
+}
+
+// Format a benchmark value with type-appropriate precision.
+function formatBenchValue(v: number, kind: BenchmarkKind | null): string {
+  const key = kind ? BENCH_META_KEY[kind] : null;
+  if (key === "timed") return v.toFixed(2);
+  if (key === "rated") return v.toFixed(1);
+  return String(Math.round(v));
+}
+
+// Descending numeric comparator with nulls pushed to the bottom regardless of
+// direction, so drills with no benchmark history never crowd the top.
+function cmpNumDesc(a: number | null, b: number | null): number {
+  if (a == null && b == null) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return b - a;
+}
 
 function SkeletonRow() {
   const [opacity] = useState(new Animated.Value(0.3));
@@ -156,13 +246,6 @@ function SquadBar({
   );
 }
 
-// Column geometry — kept in sync between TableHeader and DrillRow so
-// labels (DUR / REPS) sit directly above their values.
-const COL_BENCH_W = 56;
-const COL_REPS_W = 48;
-const COL_CHEVRON_W = 14;
-const COL_GAP = 10;
-
 function PhaseSectionHeader({
   label,
   color,
@@ -213,68 +296,11 @@ function PhaseSectionHeader({
   );
 }
 
-function TableHeader() {
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: spacing.lg,
-        paddingVertical: 10,
-        gap: COL_GAP,
-        backgroundColor: colors.surface.overlay,
-      }}
-    >
-      <Text
-        style={[
-          fontStyle("bold"),
-          {
-            flex: 1,
-            fontSize: 9.5,
-            letterSpacing: 1.4,
-            textTransform: "uppercase",
-            color: colors.text.muted,
-          },
-        ]}
-      >
-        Drill
-      </Text>
-      <Text
-        style={[
-          monoStyle("bold"),
-          {
-            width: COL_BENCH_W,
-            fontSize: 9.5,
-            letterSpacing: 1.4,
-            textTransform: "uppercase",
-            color: colors.text.muted,
-            textAlign: "right",
-          },
-        ]}
-      >
-        Dur
-      </Text>
-      <Text
-        style={[
-          monoStyle("bold"),
-          {
-            width: COL_REPS_W,
-            fontSize: 9.5,
-            letterSpacing: 1.4,
-            textTransform: "uppercase",
-            color: colors.text.muted,
-            textAlign: "right",
-          },
-        ]}
-      >
-        Reps
-      </Text>
-      <View style={{ width: COL_CHEVRON_W }} />
-    </View>
-  );
-}
-
-function DrillRow({
+// Preset-style drill card — mirrors the preset library card (PresetCard):
+// left accent stripe in the phase color, title + draft/bench badges, a
+// duration·reps meta line (phase lives in the section header so it isn't
+// repeated here), a 3-line description, and named skill chips.
+function DrillCard({
   drill,
   byId,
   onPress,
@@ -283,60 +309,42 @@ function DrillRow({
   byId: Map<string, Category>;
   onPress: () => void;
 }) {
-  // Phases live in the section header — the row's left-edge accent bar
-  // mirrors that phase color so a glance down the list reinforces which
-  // section the row belongs to. Skill / sub-skill pills still render inside
-  // the card. Drills with no phase tagged fall back to violet (a hue we
-  // don't use elsewhere) so "no phase yet" reads as its own distinct state.
+  // The card's left stripe mirrors the phase color (also shown in the section
+  // header) so a glance down the list reinforces grouping. Drills with no
+  // phase fall back to violet — a hue unused elsewhere — so "no phase yet"
+  // reads as its own state.
   const phase = drill.categoryIds
     .map((id) => byId.get(id))
     .find((c): c is Category => !!c && c.type === "phase");
   const accentColor = phase?.color ?? colors.team.violet;
 
+  const metaParts = [
+    drill.durationMin && drill.durationMin > 0 ? `${drill.durationMin}m` : null,
+    drill.reps && drill.reps > 0 ? `${drill.reps} reps` : null,
+  ].filter(Boolean) as string[];
+
+  // Benchmark stat (latest value + trend) — only when the drill has logged
+  // results for its primary type.
+  const benchMeta = benchMetaFor(drill.primaryType);
+  const showStat = drill.lastResult != null && benchMeta != null;
+  const trend = drill.trend;
+  const trendGood =
+    trend != null && trend !== 0
+      ? isLowerBetter(drill.primaryType)
+        ? trend < 0
+        : trend > 0
+      : null;
+
   return (
     <Pressable onPress={onPress}>
       {({ pressed }) => (
-        <View
-          style={{
-            flexDirection: "row",
-            alignItems: "stretch",
-            borderTopWidth: 1,
-            borderTopColor: colors.border.subtle,
-            opacity: pressed ? 0.85 : 1,
-          }}
-        >
-          {/* Left divider in skill color — short bar centered vertically */}
-          <View
-            style={{
-              width: spacing.lg,
-              alignItems: "center",
-              justifyContent: "center",
-              paddingVertical: spacing.md,
-            }}
-          >
-            <View
-              style={{
-                width: 3,
-                flex: 1,
-                borderRadius: 2,
-                backgroundColor: accentColor,
-              }}
-            />
-          </View>
+        <Card variant="filled" pad={0} style={{ overflow: "hidden", opacity: pressed ? 0.85 : 1 }}>
+          <View style={{ flexDirection: "row", alignItems: "stretch" }}>
+            {/* Left accent stripe in the phase color */}
+            <View style={{ width: 3, backgroundColor: accentColor }} />
 
-          <View
-            style={{
-              flex: 1,
-              flexDirection: "row",
-              alignItems: "center",
-              paddingRight: spacing.lg,
-              paddingVertical: spacing.lg,
-              gap: COL_GAP,
-            }}
-          >
-            {/* Name + pill row + sub-skill row */}
-            <View style={{ flex: 1, minWidth: 0, gap: spacing.sm }}>
-              {/* Title row */}
+            <View style={{ flex: 1, padding: spacing.lg, gap: spacing.sm }}>
+              {/* Title + badges */}
               <View
                 style={{
                   flexDirection: "row",
@@ -347,11 +355,7 @@ function DrillRow({
                 <Text
                   style={[
                     fontStyle("bold"),
-                    {
-                      fontSize: 14,
-                      color: colors.text.primary,
-                      flexShrink: 1,
-                    },
+                    { fontSize: 15, color: colors.text.primary, flexShrink: 1 },
                   ]}
                   numberOfLines={1}
                 >
@@ -410,10 +414,42 @@ function DrillRow({
                 )}
               </View>
 
-              {/* Skill groups — the taxonomy axis. Each renders as a filled
-                  tinted pill colored by its group. Wraps to the next line
-                  when there are enough to push the right-hand columns. */}
-              {drill.skillGroups.length > 0 && (
+              {/* Meta line — duration · reps (phase shown in section header) */}
+              {metaParts.length > 0 && (
+                <Text
+                  style={[
+                    monoStyle("medium"),
+                    {
+                      fontSize: 10,
+                      color: colors.text.muted,
+                      letterSpacing: 0.6,
+                      textTransform: "uppercase",
+                    },
+                  ]}
+                >
+                  {metaParts.join(" · ")}
+                </Text>
+              )}
+
+              {/* Description — 3-line clamp, matching the preset card */}
+              {drill.description && drill.description.length > 0 && (
+                <Text
+                  numberOfLines={3}
+                  style={[
+                    fontStyle("regular"),
+                    {
+                      fontSize: 12.5,
+                      lineHeight: 18,
+                      color: colors.text.secondary,
+                    },
+                  ]}
+                >
+                  {drill.description}
+                </Text>
+              )}
+
+              {/* Named skill chips — primaries highlighted, secondaries muted */}
+              {drill.skills.length > 0 && (
                 <View
                   style={{
                     flexDirection: "row",
@@ -422,150 +458,75 @@ function DrillRow({
                     gap: 5,
                   }}
                 >
-                  {drill.skillGroups.map((g) => {
-                    const meta = skillGroupMeta(g);
-                    return (
-                      <View
-                        key={g}
-                        style={{
-                          paddingHorizontal: 7,
-                          paddingVertical: 2,
-                          borderRadius: 4,
-                          backgroundColor: meta.tint,
-                        }}
-                      >
-                        <Text
-                          style={[
-                            fontStyle("bold"),
-                            {
-                              fontSize: 9.5,
-                              letterSpacing: 0.6,
-                              textTransform: "uppercase",
-                              color: meta.color,
-                            },
-                          ]}
-                        >
-                          {meta.label}
-                        </Text>
-                      </View>
-                    );
-                  })}
+                  {drill.skills.map((s) => (
+                    <SkillChip key={s.id} skill={s} />
+                  ))}
                 </View>
               )}
-            </View>
 
-            {/* DURATION column */}
-            <View style={{ width: COL_BENCH_W, alignItems: "flex-end" }}>
-              {drill.durationMin != null && drill.durationMin > 0 ? (
+              {/* Benchmark stat — latest value + run count + trend delta */}
+              {showStat && benchMeta && drill.lastResult != null && (
                 <View
                   style={{
                     flexDirection: "row",
-                    alignItems: "baseline",
-                    gap: 2,
+                    alignItems: "center",
+                    gap: 8,
+                    marginTop: 2,
                   }}
                 >
-                  <Text
-                    style={[
-                      monoStyle("bold"),
-                      {
-                        fontSize: 13,
-                        color: colors.text.primary,
-                        letterSpacing: -0.2,
-                      },
-                    ]}
-                  >
-                    {drill.durationMin}
-                  </Text>
+                  <Ionicons
+                    name={benchMeta.icon}
+                    size={12}
+                    color={colors.text.muted}
+                  />
+                  <View style={{ flexDirection: "row", alignItems: "baseline", gap: 2 }}>
+                    <Text
+                      style={[
+                        monoStyle("bold"),
+                        { fontSize: 13, color: colors.text.primary, letterSpacing: -0.2 },
+                      ]}
+                    >
+                      {formatBenchValue(drill.lastResult, drill.primaryType)}
+                    </Text>
+                    <Text
+                      style={[
+                        monoStyle("medium"),
+                        { fontSize: 10, color: colors.text.muted, letterSpacing: 0.4 },
+                      ]}
+                    >
+                      {benchMeta.unit}
+                    </Text>
+                  </View>
                   <Text
                     style={[
                       monoStyle("medium"),
-                      {
-                        fontSize: 10,
-                        color: colors.text.muted,
-                        letterSpacing: 0.4,
-                      },
+                      { fontSize: 10, color: colors.text.muted, letterSpacing: 0.4 },
                     ]}
                   >
-                    m
+                    · {drill.runs} {drill.runs === 1 ? "run" : "runs"}
                   </Text>
+                  {trend != null && trend !== 0 && (
+                    <Text
+                      style={[
+                        monoStyle("bold"),
+                        {
+                          fontSize: 11,
+                          letterSpacing: -0.2,
+                          color: trendGood ? colors.lime[400] : colors.red.semantic,
+                        },
+                      ]}
+                    >
+                      {trend > 0 ? "↑" : "↓"}
+                      {Math.abs(trend) % 1 === 0
+                        ? Math.abs(trend)
+                        : Math.abs(trend).toFixed(2)}
+                    </Text>
+                  )}
                 </View>
-              ) : (
-                <Text
-                  style={[
-                    monoStyle("medium"),
-                    {
-                      fontSize: 11,
-                      color: colors.text.muted,
-                      letterSpacing: 0.4,
-                    },
-                  ]}
-                >
-                  —
-                </Text>
               )}
             </View>
-
-            {/* REPS column */}
-            <View
-              style={{ width: COL_REPS_W, alignItems: "flex-end" }}
-            >
-              {drill.reps != null && drill.reps > 0 ? (
-                <View
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "baseline",
-                    gap: 2,
-                  }}
-                >
-                  <Text
-                    style={[
-                      monoStyle("bold"),
-                      {
-                        fontSize: 13,
-                        color: colors.text.primary,
-                        letterSpacing: -0.2,
-                      },
-                    ]}
-                  >
-                    {drill.reps}
-                  </Text>
-                  <Text
-                    style={[
-                      monoStyle("medium"),
-                      {
-                        fontSize: 10,
-                        color: colors.text.muted,
-                        letterSpacing: 0.4,
-                      },
-                    ]}
-                  >
-                    ×
-                  </Text>
-                </View>
-              ) : (
-                <Text
-                  style={[
-                    monoStyle("medium"),
-                    {
-                      fontSize: 11,
-                      color: colors.text.muted,
-                      letterSpacing: 0.4,
-                    },
-                  ]}
-                >
-                  —
-                </Text>
-              )}
-            </View>
-
-            {/* Chevron */}
-            <Ionicons
-              name="chevron-forward"
-              size={COL_CHEVRON_W}
-              color={colors.text.muted}
-            />
           </View>
-        </View>
+        </Card>
       )}
     </Pressable>
   );
@@ -587,7 +548,7 @@ export default function DrillListScreen() {
   >(ALL);
   const [activeStatus, setActiveStatus] = useState<StatusFilter>("all");
   const [activeBenchmark, setActiveBenchmark] = useState<BenchmarkFilter>("all");
-  const [sortBy, setSortBy] = useState<SortOption>("name_asc");
+  const [sortBy, setSortBy] = useState<SortOption>("updated");
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -602,7 +563,7 @@ export default function DrillListScreen() {
           await supabase
             .from("team_drills")
             .select(
-              "id, drill_name, status, benchmark_type, benchmark_types, default_reps, default_duration_min, created_by, created_at, team_drill_categories(category_id)"
+              "id, drill_name, description, status, benchmark_type, benchmark_types, default_reps, default_duration_min, created_by, created_at, updated_at, team_drill_categories(category_id)"
             )
             .eq("team_id", teamId)
             .order("drill_name", { ascending: true });
@@ -610,7 +571,7 @@ export default function DrillListScreen() {
           res = await supabase
             .from("team_drills")
             .select(
-              "id, drill_name, status, benchmark_type, default_reps, default_duration_min, created_by, created_at, team_drill_categories(category_id)"
+              "id, drill_name, description, status, benchmark_type, default_reps, default_duration_min, created_by, created_at, updated_at, team_drill_categories(category_id)"
             )
             .eq("team_id", teamId)
             .order("drill_name", { ascending: true });
@@ -636,7 +597,29 @@ export default function DrillListScreen() {
     const visibleIds = (drillsRes.data ?? [])
       .filter((d) => d.status === "published" || d.created_by === userId)
       .map((d) => d.id as string);
-    const skillsByDrill = await loadDrillSkills(visibleIds);
+    const [skillsByDrill, resultsRes] = await Promise.all([
+      loadDrillSkills(visibleIds),
+      visibleIds.length
+        ? supabase
+            .from("benchmark_results")
+            .select(
+              "drill_id, benchmark_type, time_seconds, rating, made_count, attempts_count, created_at"
+            )
+            .in("drill_id", visibleIds)
+            .order("created_at", { ascending: true })
+        : Promise.resolve({ data: [] as ResultRow[], error: null }),
+    ]);
+
+    // Group results by drill (already oldest → newest). Errors degrade to an
+    // empty map so the list still renders without benchmark stats.
+    const resultsByDrill = new Map<string, ResultRow[]>();
+    if (!resultsRes.error) {
+      for (const r of (resultsRes.data ?? []) as ResultRow[]) {
+        const arr = resultsByDrill.get(r.drill_id) ?? [];
+        arr.push(r);
+        resultsByDrill.set(r.drill_id, arr);
+      }
+    }
 
     const drillRows: Drill[] = (drillsRes.data ?? [])
       .filter((d) => {
@@ -655,18 +638,49 @@ export default function DrillListScreen() {
         const skillGroups: SkillGroup[] = SKILL_GROUP_META.filter((m) =>
           tagged.some((t) => t.skill_group === m.id)
         ).map((m) => m.id);
+        // Skills for the card chips — primaries first, then canonical group
+        // order, so the chip row reads the same as the preset cards.
+        const groupOrder = new Map(
+          SKILL_GROUP_META.map((m, i) => [m.id, i] as const)
+        );
+        const skills: TaggedSkill[] = [...tagged].sort((a, b) => {
+          if (a.weight !== b.weight) return b.weight - a.weight;
+          return (
+            (groupOrder.get(a.skill_group) ?? 99) -
+            (groupOrder.get(b.skill_group) ?? 99)
+          );
+        });
+
+        // Benchmark history aggregates for the primary type (first listed),
+        // mirroring the web drill library.
+        const benchmarkTypes =
+          (d.benchmark_types as BenchmarkKind[] | null) ??
+          (d.benchmark_type ? [d.benchmark_type as BenchmarkKind] : []);
+        const primaryType = benchmarkTypes[0] ?? null;
+        const allResults = resultsByDrill.get(d.id as string) ?? [];
+        const matching = primaryType
+          ? allResults.filter((r) => r.benchmark_type === primaryType)
+          : allResults;
+        const samples = matching
+          .slice(-5)
+          .map(resultValue)
+          .filter((v): v is number => v != null);
+        const lastResult = samples.length > 0 ? samples[samples.length - 1] : null;
+        const trend =
+          samples.length >= 2
+            ? Number((samples[samples.length - 1] - samples[0]).toFixed(2))
+            : null;
+
         return {
           id: d.id as string,
           name: d.drill_name as string,
+          description: (d.description as string | null) ?? null,
           status: d.status as "draft" | "published",
-          benchmarkTypes:
-            (d.benchmark_types as BenchmarkKind[] | null) ??
-            (d.benchmark_type
-              ? [d.benchmark_type as BenchmarkKind]
-              : []),
+          benchmarkTypes,
           categoryIds: ids,
           categoryNames: names,
           skillGroups,
+          skills,
           durationMin:
             typeof d.default_duration_min === "number"
               ? (d.default_duration_min as number)
@@ -676,6 +690,11 @@ export default function DrillListScreen() {
               ? (d.default_reps as number)
               : null,
           createdAt: (d.created_at as string) ?? "",
+          updatedAt: (d.updated_at as string) ?? (d.created_at as string) ?? "",
+          primaryType,
+          runs: matching.length,
+          lastResult,
+          trend,
         };
       });
 
@@ -759,10 +778,30 @@ export default function DrillListScreen() {
           : d.benchmarkTypes.includes(activeBenchmark);
       return skillMatch && searchMatch && statusMatch && benchmarkMatch;
     });
-    if (sortBy === "recent") {
-      return [...matched].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    const arr = [...matched];
+    switch (sortBy) {
+      case "name_asc":
+        arr.sort((a, b) => a.name.localeCompare(b.name));
+        break;
+      case "recent":
+        arr.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+        break;
+      case "last":
+        arr.sort((a, b) => cmpNumDesc(a.lastResult, b.lastResult));
+        break;
+      case "trend":
+        arr.sort((a, b) => cmpNumDesc(a.trend, b.trend));
+        break;
+      case "runs":
+        arr.sort((a, b) => b.runs - a.runs);
+        break;
+      case "updated":
+      default:
+        // Most-recently-updated first.
+        arr.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+        break;
     }
-    return [...matched].sort((a, b) => a.name.localeCompare(b.name));
+    return arr;
   }, [drills, activeSkillGroup, activeStatus, activeBenchmark, search, sortBy]);
 
   // Group the filtered drills by their primary phase (first phase-type
@@ -846,7 +885,18 @@ export default function DrillListScreen() {
     (activeStatus !== "all" ? 1 : 0) +
     (activeBenchmark !== "all" ? 1 : 0);
 
-  const sortLabel = sortBy === "recent" ? "Recent" : "A–Z";
+  const sortLabel =
+    sortBy === "name_asc"
+      ? "A–Z"
+      : sortBy === "recent"
+      ? "Added"
+      : sortBy === "last"
+      ? "Latest"
+      : sortBy === "trend"
+      ? "Trend"
+      : sortBy === "runs"
+      ? "Runs"
+      : "Updated";
 
   const goToDrill = (id: string) => {
     router.push(`/drills/${id}` as never);
@@ -1238,18 +1288,15 @@ export default function DrillListScreen() {
                 color={section.color}
                 count={section.drills.length}
               />
-              <View style={{ marginHorizontal: spacing.lg }}>
-                <Card variant="filled" pad={0} style={{ overflow: "hidden" }}>
-                  <TableHeader />
-                  {section.drills.map((d) => (
-                    <DrillRow
-                      key={d.id}
-                      drill={d}
-                      byId={byId}
-                      onPress={() => goToDrill(d.id)}
-                    />
-                  ))}
-                </Card>
+              <View style={{ marginHorizontal: spacing.lg, gap: spacing.md }}>
+                {section.drills.map((d) => (
+                  <DrillCard
+                    key={d.id}
+                    drill={d}
+                    byId={byId}
+                    onPress={() => goToDrill(d.id)}
+                  />
+                ))}
               </View>
             </View>
           ))
@@ -1551,8 +1598,12 @@ function SortSheet({
   setSortBy: (v: SortOption) => void;
 }) {
   const options: { value: SortOption; label: string }[] = [
+    { value: "updated", label: "Recently updated" },
     { value: "name_asc", label: "Name (A–Z)" },
     { value: "recent", label: "Recently added" },
+    { value: "last", label: "Latest result" },
+    { value: "trend", label: "Trend" },
+    { value: "runs", label: "Most runs" },
   ];
   return (
     <SheetContainer open={open} onClose={onClose}>

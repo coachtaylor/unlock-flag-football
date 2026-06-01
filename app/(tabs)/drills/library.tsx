@@ -16,6 +16,7 @@ import { ConfirmDialog } from "../../../components/ui/ConfirmDialog";
 import { Eyebrow } from "../../../components/ui/Eyebrow";
 import { HeaderIconButton } from "../../../components/ui/HeaderIconButton";
 import { SheetContainer, SheetSectionLabel } from "../../../components/ui/Sheet";
+import { SkillChip } from "../../../components/ui/SkillChip";
 import { PhaseChip } from "../../../components/DrillForm";
 import { colors, radius, spacing, tracking } from "../../../constants/design";
 import { fontStyle, monoStyle } from "../../../constants/typography";
@@ -30,7 +31,6 @@ import {
   removeClonedDrill,
   type PresetDrillWithSkills,
 } from "../../../lib/preset-library";
-import type { TaggedSkill } from "../../../lib/skills";
 import { useTeam } from "../../../lib/team-context";
 
 const FORMATS = ["5v5", "7v7"] as const;
@@ -625,47 +625,6 @@ function PresetCard({
         </View>
       </View>
     </Card>
-  );
-}
-
-function SkillChip({ skill }: { skill: TaggedSkill }) {
-  const isPrimary = skill.weight === 1.0;
-  const meta = skillGroupMeta(skill.skill_group);
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 4,
-        paddingHorizontal: 7,
-        paddingVertical: 2,
-        borderRadius: 4,
-        backgroundColor: isPrimary ? meta.tint : colors.surface.overlay,
-        borderWidth: 1,
-        borderColor: isPrimary ? meta.color : "transparent",
-      }}
-    >
-      <View
-        style={{
-          width: 5,
-          height: 5,
-          borderRadius: 3,
-          backgroundColor: meta.color,
-          opacity: isPrimary ? 1 : 0.6,
-        }}
-      />
-      <Text
-        style={[
-          isPrimary ? fontStyle("bold") : fontStyle("medium"),
-          {
-            fontSize: 10.5,
-            color: isPrimary ? colors.text.primary : colors.text.muted,
-          },
-        ]}
-      >
-        {skill.skill_name}
-      </Text>
-    </View>
   );
 }
 
