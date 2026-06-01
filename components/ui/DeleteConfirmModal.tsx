@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { colors, radius, spacing } from "../../constants/design";
 import { fontStyle, MonoText } from "../../constants/typography";
+import { isUntitledPlanTitle } from "../../lib/practice";
 
 // Destructive confirmation for permanently deleting an archived practice.
 // To prevent an accidental tap from wiping a plan + its logged data, the
@@ -40,7 +41,9 @@ export function DeleteConfirmModal({
     if (open) setValue("");
   }, [open]);
 
-  const hasTitle = !!title && title.trim().length > 0;
+  // A real, user-given name requires typing to confirm; placeholder/blank
+  // titles fall back to a plain confirm.
+  const hasTitle = !isUntitledPlanTitle(title);
   const matches = !hasTitle || value === title;
 
   return (
