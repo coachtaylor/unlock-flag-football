@@ -391,8 +391,9 @@ export function DrillForm({
 
     const missing: string[] = [];
     if (!drillName.trim()) missing.push("Drill name");
-    if (targetStatus === "published" && categoryIds.length === 0)
-      missing.push("Category");
+    // Phase is required to save at all (not just to publish) — every drill
+    // needs a practice phase so it groups in the library + planner.
+    if (categoryIds.length === 0) missing.push("Phase");
 
     if (missing.length > 0) {
       const verb = targetStatus === "published" ? "publish" : "save";
