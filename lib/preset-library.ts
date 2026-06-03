@@ -173,9 +173,9 @@ export type RemoveCloneResult = { ok: true } | { ok: false; error: string };
 
 // Turn a Postgres FK-violation (23503) on team_drills delete into a friendly,
 // actionable message. The data tables (benchmark_results, practice_plan_drills)
-// keep their no-cascade FKs on purpose, so removing a drill that has real data
+// keep their no-cascade FKs on purpose, so deleting a drill that has real data
 // is blocked — tell the coach why instead of leaking the raw constraint text.
-// Shared verbatim with the web copy (unlock-web preset-library-data.ts).
+// Kept in sync verbatim with the web copy (unlock-web lib/drills/lifecycle-actions.ts).
 export function friendlyRemoveCloneError(error: {
   code?: string;
   message?: string;
@@ -184,27 +184,72 @@ export function friendlyRemoveCloneError(error: {
   const haystack = `${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
   if (error.code === "23503" || haystack.includes("foreign key")) {
     if (haystack.includes("benchmark_results")) {
-      return "This drill has benchmark results logged. Archive it instead of removing it from the library.";
+      return "This drill has benchmark results logged. Archive it instead of deleting it.";
     }
     if (haystack.includes("practice_plan_drills")) {
-      return "This drill is used in a practice plan. Remove it from the plan first, then remove it from the library.";
+      return "This drill is used in a practice plan. Remove it from the plan first, then delete it.";
     }
-    return "This drill has linked data and can't be removed from the library.";
+    return "This drill has linked data and can't be deleted.";
   }
-  return error.message ?? "Couldn't remove the drill.";
+  return error.message ?? "Couldn't delete the drill.";
 }
 
 /**
- * Remove this team's clone of a preset from the team library. Deletes the
- * team_drills row (same hard-delete the drill library / drill detail uses) —
- * this only ever touches the team's COPY. The global preset_drills row is
- * never affected; the preset stays browsable and re-addable.
+ * Hard-delete a team_drills row. Used both for the preset "Remove from
+ * library" flow and the custom-drill permanent delete (only reachable from
+ * the archive, behind a type-the-name confirm). Only ever touches the team's
+ * COPY; a global preset_drills row is never affected. RLS enforces team
+ * membership.
  */
-export async function removeClonedDrill(
+export async function deleteTeamDrill(
   drillId: string
 ): Promise<RemoveCloneResult> {
   if (!drillId) return { ok: false, error: "Missing drill id." };
   const { error } = await supabase.from("team_drills").delete().eq("id", drillId);
   if (error) return { ok: false, error: friendlyRemoveCloneError(error) };
+  return { ok: true };
+}
+
+/**
+ * Remove this team's clone of a preset from the team library. Thin alias over
+ * deleteTeamDrill so the preset remove and the custom-drill permanent delete
+ * share one source of truth. The global preset_drills row stays re-addable.
+ */
+export async function removeClonedDrill(
+  drillId: string
+): Promise<RemoveCloneResult> {
+  return deleteTeamDrill(drillId);
+}
+
+/**
+ * Soft-delete a custom drill: it drops out of the active library + every
+ * status='published' picker (practice planner, benchmark hub). All linked
+ * data (benchmark_results, etc.) is kept. Mirrors the practice archive.
+ */
+export async function archiveTeamDrill(
+  drillId: string
+): Promise<RemoveCloneResult> {
+  if (!drillId) return { ok: false, error: "Missing drill id." };
+  const { error } = await supabase
+    .from("team_drills")
+    .update({ status: "archived" })
+    .eq("id", drillId);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
+/**
+ * Restore an archived drill. Returns to 'draft' (never auto-republishes) so a
+ * coach re-reviews before it re-enters the shared library + pickers.
+ */
+export async function unarchiveTeamDrill(
+  drillId: string
+): Promise<RemoveCloneResult> {
+  if (!drillId) return { ok: false, error: "Missing drill id." };
+  const { error } = await supabase
+    .from("team_drills")
+    .update({ status: "draft" })
+    .eq("id", drillId);
+  if (error) return { ok: false, error: error.message };
   return { ok: true };
 }

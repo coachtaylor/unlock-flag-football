@@ -30,6 +30,7 @@ import { EntityHistorySheet } from "../../../../components/activity/EntityHistor
 import { resolveActorName } from "../../../../lib/activity";
 import { PastDueModal } from "../../../../components/ui/PastDueModal";
 import { DeleteConfirmModal } from "../../../../components/ui/DeleteConfirmModal";
+import { isUntitledPlanTitle } from "../../../../lib/practice";
 import { ActionModal, useActionModal } from "../../../../components/ui/ActionModal";
 import {
   PracticeAttendanceSheet,
@@ -2370,7 +2371,8 @@ export default function PracticePlanDetailScreen() {
       <DeleteConfirmModal
         open={deleteOpen}
         onClose={() => setDeleteOpen(false)}
-        title={plan.title}
+        name={isUntitledPlanTitle(plan.title) ? null : plan.title}
+        noun="practice"
         busy={busy}
         onConfirm={deletePlan}
       />

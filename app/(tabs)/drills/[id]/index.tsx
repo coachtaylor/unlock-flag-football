@@ -30,10 +30,16 @@ import { Byline } from "../../../../components/ui/Byline";
 import { EntityHistorySheet } from "../../../../components/activity/EntityHistorySheet";
 import { Button } from "../../../../components/ui/Button";
 import { ConfirmDialog } from "../../../../components/ui/ConfirmDialog";
+import { DeleteConfirmModal } from "../../../../components/ui/DeleteConfirmModal";
 import { colors, radius, spacing } from "../../../../constants/design";
 import { fontStyle, monoStyle } from "../../../../constants/typography";
 import { supabase } from "../../../../lib/supabase";
 import { useTeam } from "../../../../lib/team-context";
+import {
+  archiveTeamDrill,
+  unarchiveTeamDrill,
+  deleteTeamDrill,
+} from "../../../../lib/preset-library";
 import { generateSetupInstructions } from "../../../../lib/generate-setup-instructions";
 import type { DiagramData } from "../../../../types/diagram";
 import {
@@ -59,7 +65,8 @@ type DrillRow = {
   benchmark_types: string[] | null;
   benchmark_scope?: string | null;
   benchmark_config?: unknown;
-  status: "draft" | "published";
+  status: "draft" | "published" | "archived";
+  preset_drill_id?: string | null;
   setup_instructions: string | null;
   setup_diagram: DiagramData | null;
   equipment: { cones?: number; other?: unknown } | null;
@@ -76,11 +83,11 @@ type DrillRow = {
 const PIN_CAP = 4;
 
 const DRILL_SELECT =
-  "id, team_id, drill_name, description, source_url, benchmark_type, benchmark_types, benchmark_scope, benchmark_config, status, setup_instructions, setup_diagram, equipment, default_reps, default_duration_min, is_dashboard_pinned, created_at, updated_at, created_by, updated_by, team_drill_categories(category_id)";
+  "id, team_id, drill_name, description, source_url, benchmark_type, benchmark_types, benchmark_scope, benchmark_config, status, preset_drill_id, setup_instructions, setup_diagram, equipment, default_reps, default_duration_min, is_dashboard_pinned, created_at, updated_at, created_by, updated_by, team_drill_categories(category_id)";
 // Same as DRILL_SELECT minus the Build 14.5 attribution columns, for projects
 // where migration 75 hasn't shipped (the byline just renders nothing there).
 const DRILL_SELECT_NO_ATTRIB =
-  "id, team_id, drill_name, description, source_url, benchmark_type, benchmark_types, benchmark_scope, benchmark_config, status, setup_instructions, setup_diagram, equipment, default_reps, default_duration_min, is_dashboard_pinned, team_drill_categories(category_id)";
+  "id, team_id, drill_name, description, source_url, benchmark_type, benchmark_types, benchmark_scope, benchmark_config, status, preset_drill_id, setup_instructions, setup_diagram, equipment, default_reps, default_duration_min, is_dashboard_pinned, team_drill_categories(category_id)";
 const DRILL_SELECT_PRE_PIN =
   "id, team_id, drill_name, description, source_url, benchmark_type, benchmark_types, benchmark_scope, benchmark_config, status, setup_instructions, setup_diagram, equipment, default_reps, default_duration_min, team_drill_categories(category_id)";
 const DRILL_SELECT_MIG_18 =
@@ -250,7 +257,10 @@ export default function DrillDetailScreen() {
   };
 
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [confirmArchiveOpen, setConfirmArchiveOpen] = useState(false);
+  const [typeDeleteOpen, setTypeDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Dashboard-pin state. `pinSupported` flips off if the column doesn't
@@ -316,24 +326,54 @@ export default function DrillDetailScreen() {
     refreshPinCount();
   }, [drill, pinBusy, refreshPinCount]);
 
-  const handleDelete = async () => {
+  const goBackToLibrary = () => {
+    // Pop back to the library — the drill no longer exists or has moved out
+    // of the active list, so the detail route is no longer meaningful.
+    if (router.canGoBack()) router.back();
+    else router.replace("/drills" as never);
+  };
+
+  // Hard delete — used for preset "Remove from library" and the custom-drill
+  // permanent delete (only after it's archived). Goes through the canonical
+  // deleteTeamDrill so FK-blocked deletes show a friendly message.
+  const handleHardDelete = async () => {
     if (!drill) return;
     setDeleting(true);
     setDeleteError(null);
-    const { error: deleteErr } = await supabase
-      .from("team_drills")
-      .delete()
-      .eq("id", drill.id);
+    const r = await deleteTeamDrill(drill.id);
     setDeleting(false);
-    if (deleteErr) {
-      setDeleteError(deleteErr.message);
+    if (!r.ok) {
+      setDeleteError(r.error);
       return;
     }
     setConfirmDeleteOpen(false);
-    // Pop back to the library — the drill no longer exists, so the detail
-    // route is invalid.
-    if (router.canGoBack()) router.back();
-    else router.replace("/drills" as never);
+    setTypeDeleteOpen(false);
+    goBackToLibrary();
+  };
+
+  // Soft delete — a custom drill drops out of the active library + pickers.
+  const handleArchive = async () => {
+    if (!drill) return;
+    setArchiving(true);
+    setDeleteError(null);
+    const r = await archiveTeamDrill(drill.id);
+    setArchiving(false);
+    if (!r.ok) {
+      setDeleteError(r.error);
+      return;
+    }
+    setConfirmArchiveOpen(false);
+    goBackToLibrary();
+  };
+
+  const handleUnarchive = async () => {
+    if (!drill) return;
+    const r = await unarchiveTeamDrill(drill.id);
+    if (!r.ok) {
+      setDeleteError(r.error);
+      return;
+    }
+    await load();
   };
 
   if (loading) {
@@ -423,7 +463,15 @@ export default function DrillDetailScreen() {
   const showRunBenchmark =
     isBenchmarkDrill && drill.status === "published";
   const isLive = drill.status === "published";
-  const eyebrow = isLive ? "DRILL · LIVE" : "DRILL · DRAFT";
+  // Lifecycle context for the manage actions: preset clones are removed from
+  // the library; custom drills archive → (unarchive | delete).
+  const isPreset = drill.preset_drill_id != null;
+  const isArchived = drill.status === "archived";
+  const eyebrow = isArchived
+    ? "DRILL · ARCHIVED"
+    : isLive
+    ? "DRILL · LIVE"
+    : "DRILL · DRAFT";
   const monogram = getMonogram(drill.drill_name);
 
   // Reserve room for the sticky Run benchmark CTA when it renders so it
@@ -910,36 +958,50 @@ export default function DrillDetailScreen() {
           </View>
         </Section>
 
-        {/* Remove drill — inline link at the bottom of the page, not sticky.
-            Full-access only. */}
+        {/* Lifecycle actions — inline links at the bottom of the page, not
+            sticky. Full-access only. Mirrors the drill cards: preset clones
+            are removed; custom drills archive → (unarchive | delete). */}
         {canManage && (
         <View
           style={{
             alignItems: "center",
             paddingVertical: spacing.md,
+            gap: spacing.lg,
+            flexDirection: "row",
+            justifyContent: "center",
           }}
         >
-          <TouchableOpacity
-            onPress={() => {
-              setDeleteError(null);
-              setConfirmDeleteOpen(true);
-            }}
-            accessibilityLabel="Remove Drill"
-            hitSlop={10}
-            activeOpacity={0.6}
-          >
-            <Text
-              style={[
-                fontStyle("medium"),
-                {
-                  fontSize: 17,
-                  color: colors.error,
-                },
-              ]}
-            >
-              Remove Drill
-            </Text>
-          </TouchableOpacity>
+          {isPreset ? (
+            <ManageLink
+              label="Remove Drill"
+              danger
+              onPress={() => {
+                setDeleteError(null);
+                setConfirmDeleteOpen(true);
+              }}
+            />
+          ) : isArchived ? (
+            <>
+              <ManageLink label="Unarchive" onPress={handleUnarchive} />
+              <ManageLink
+                label="Delete Drill"
+                danger
+                onPress={() => {
+                  setDeleteError(null);
+                  setTypeDeleteOpen(true);
+                }}
+              />
+            </>
+          ) : (
+            <ManageLink
+              label="Archive Drill"
+              danger
+              onPress={() => {
+                setDeleteError(null);
+                setConfirmArchiveOpen(true);
+              }}
+            />
+          )}
         </View>
         )}
       </ScrollView>
@@ -967,27 +1029,82 @@ export default function DrillDetailScreen() {
         </View>
       )}
 
-      {/* Delete confirmation */}
+      {/* Preset "Remove from library" confirmation. */}
       <ConfirmDialog
         open={confirmDeleteOpen}
         onCancel={() => setConfirmDeleteOpen(false)}
-        onConfirm={handleDelete}
+        onConfirm={handleHardDelete}
         title="Remove drill?"
         body={
           drill?.drill_name
-            ? `"${drill.drill_name}" will be removed from your team library. This can't be undone.`
-            : "This drill will be removed from your team library. This can't be undone."
+            ? `"${drill.drill_name}" will be removed from your team library. The preset stays available to add again.`
+            : "This drill will be removed from your team library. The preset stays available to add again."
         }
         confirmLabel="Remove"
         pendingLabel="Removing…"
         pending={deleting}
         error={deleteError}
       />
+
+      {/* Custom-drill archive confirmation (data is kept). */}
+      <ConfirmDialog
+        open={confirmArchiveOpen}
+        onCancel={() => setConfirmArchiveOpen(false)}
+        onConfirm={handleArchive}
+        title="Archive drill?"
+        body="It moves to your Archived list — all data is kept, and you can unarchive it later."
+        confirmLabel="Archive"
+        pendingLabel="Archiving…"
+        pending={archiving}
+        error={deleteError}
+      />
+
+      {/* Permanent delete of an archived custom drill — type the name to
+          confirm, same gate as the library archive + practice delete. */}
+      <DeleteConfirmModal
+        open={typeDeleteOpen}
+        onClose={() => setTypeDeleteOpen(false)}
+        name={drill?.drill_name ?? null}
+        noun="drill"
+        busy={deleting}
+        error={deleteError}
+        onConfirm={handleHardDelete}
+      />
     </View>
   );
 }
 
 // ── Sub-components ────────────────────────────────────────────────────
+
+// Inline text link for the bottom-of-page lifecycle actions (archive /
+// unarchive / remove / delete).
+function ManageLink({
+  label,
+  danger,
+  onPress,
+}: {
+  label: string;
+  danger?: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      onPress={onPress}
+      accessibilityLabel={label}
+      hitSlop={10}
+      activeOpacity={0.6}
+    >
+      <Text
+        style={[
+          fontStyle("medium"),
+          { fontSize: 17, color: danger ? colors.error : colors.text.primary },
+        ]}
+      >
+        {label}
+      </Text>
+    </TouchableOpacity>
+  );
+}
 
 function PinToDashboardRow({
   pinned,

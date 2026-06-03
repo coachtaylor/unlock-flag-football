@@ -9,42 +9,44 @@ import {
 } from "react-native";
 import { colors, radius, spacing } from "../../constants/design";
 import { fontStyle, MonoText } from "../../constants/typography";
-import { isUntitledPlanTitle } from "../../lib/practice";
 
-// Destructive confirmation for permanently deleting an archived practice.
-// To prevent an accidental tap from wiping a plan + its logged data, the
-// coach must type the practice title back exactly (case-sensitive). The
-// Delete button stays disabled until the typed value matches.
+// Generic destructive confirmation. To prevent an accidental tap from wiping
+// a record + its data, the user must type the record's name back exactly
+// (case-sensitive). The Delete button stays disabled until it matches.
 //
-// Untitled practices have no name to match against, so they fall back to a
-// plain confirm (still a deliberate two-tap action, just no typing gate).
+// Records with no real name (e.g. an untitled practice) pass name=null to
+// skip the typing gate and fall back to a plain confirm. Canonical home for
+// the type-to-confirm pattern — practice (plan archive) and the drill library
+// both render this.
 export function DeleteConfirmModal({
   open,
   onClose,
-  title,
+  name,
+  noun = "item",
   onConfirm,
   busy,
+  error,
 }: {
   open: boolean;
   onClose: () => void;
   /**
-   * The practice title the coach must re-type to confirm (case-sensitive).
-   * Empty/whitespace => the practice is untitled and the typing gate is
-   * skipped.
+   * The name the user must re-type to confirm (case-sensitive). Empty /
+   * null / whitespace => no real name, so the typing gate is skipped.
    */
-  title: string | null | undefined;
+  name: string | null | undefined;
+  /** Lowercase singular noun for the copy, e.g. "practice" | "drill". */
+  noun?: string;
   onConfirm: () => void;
   busy?: boolean;
+  error?: string | null;
 }) {
   const [value, setValue] = useState("");
   useEffect(() => {
     if (open) setValue("");
   }, [open]);
 
-  // A real, user-given name requires typing to confirm; placeholder/blank
-  // titles fall back to a plain confirm.
-  const hasTitle = !isUntitledPlanTitle(title);
-  const matches = !hasTitle || value === title;
+  const hasName = !!name && name.trim().length > 0;
+  const matches = !hasName || value === name;
 
   return (
     <Modal visible={open} animationType="fade" transparent onRequestClose={onClose}>
@@ -91,12 +93,12 @@ export function DeleteConfirmModal({
               { fontSize: 14, lineHeight: 20, color: colors.text.secondary },
             ]}
           >
-            {hasTitle
-              ? "Deleting removes the practice and all of its data for good. To confirm, type the practice name below."
-              : "Deleting removes this practice and all of its data for good."}
+            {hasName
+              ? `Deleting removes the ${noun} and all of its data for good. To confirm, type the ${noun} name below.`
+              : `Deleting removes this ${noun} and all of its data for good.`}
           </Text>
 
-          {hasTitle ? (
+          {hasName ? (
             <>
               <View
                 style={{
@@ -107,14 +109,14 @@ export function DeleteConfirmModal({
                 }}
               >
                 <MonoText style={{ fontSize: 13, color: colors.text.primary }}>
-                  {title}
+                  {name}
                 </MonoText>
               </View>
 
               <TextInput
                 value={value}
                 onChangeText={setValue}
-                placeholder="Type the practice name"
+                placeholder={`Type the ${noun} name`}
                 placeholderTextColor={colors.text.muted}
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -137,6 +139,17 @@ export function DeleteConfirmModal({
             </>
           ) : null}
 
+          {error ? (
+            <Text
+              style={[
+                fontStyle("regular"),
+                { fontSize: 13, lineHeight: 18, color: colors.red.semantic },
+              ]}
+            >
+              {error}
+            </Text>
+          ) : null}
+
           <View style={{ gap: spacing.sm, marginTop: spacing.sm }}>
             <TouchableOpacity
               activeOpacity={0.85}
@@ -152,7 +165,7 @@ export function DeleteConfirmModal({
               }}
             >
               <Text style={[fontStyle("bold"), { fontSize: 15, color: "#FFFFFF" }]}>
-                {busy ? "Deleting…" : "Delete practice"}
+                {busy ? "Deleting…" : `Delete ${noun}`}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity

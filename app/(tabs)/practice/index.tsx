@@ -22,6 +22,7 @@ import {
   type ActionModalConfig,
 } from "../../../components/ui/ActionModal";
 import { DeleteConfirmModal } from "../../../components/ui/DeleteConfirmModal";
+import { isUntitledPlanTitle } from "../../../lib/practice";
 import { Eyebrow } from "../../../components/ui/Eyebrow";
 import { colors, radius, spacing } from "../../../constants/design";
 import { fontStyle, MonoText } from "../../../constants/typography";
@@ -1894,7 +1895,8 @@ export default function PracticeListScreen() {
       <DeleteConfirmModal
         open={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        title={deleteTarget?.title}
+        name={isUntitledPlanTitle(deleteTarget?.title) ? null : deleteTarget?.title}
+        noun="practice"
         busy={deleting}
         onConfirm={async () => {
           if (!deleteTarget) return;

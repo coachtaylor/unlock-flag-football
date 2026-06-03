@@ -7,6 +7,7 @@ import {
   ScrollView,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -40,6 +41,17 @@ import { loadDrillSkills, type TaggedSkill } from "../../../lib/skills";
 import { loadDrillCategories } from "../../../lib/load-categories";
 import { useTeam } from "../../../lib/team-context";
 import { useAuth } from "../../../lib/auth-context";
+import {
+  ActionModal,
+  useActionModal,
+  type ActionModalConfig,
+} from "../../../components/ui/ActionModal";
+import { DeleteConfirmModal } from "../../../components/ui/DeleteConfirmModal";
+import {
+  archiveTeamDrill,
+  unarchiveTeamDrill,
+  deleteTeamDrill,
+} from "../../../lib/preset-library";
 
 const ALL = "__all__";
 
@@ -68,7 +80,10 @@ type Drill = {
   id: string;
   name: string;
   description: string | null;
-  status: "draft" | "published";
+  status: "draft" | "published" | "archived";
+  // true => clone of a global preset (remove from library); false => custom
+  // drill (archive → delete lifecycle).
+  isPreset: boolean;
   benchmarkTypes: BenchmarkKind[];
   categoryIds: string[];
   categoryNames: string[];
@@ -91,7 +106,7 @@ type Drill = {
   trend: number | null;
 };
 
-type StatusFilter = "all" | "draft" | "published";
+type StatusFilter = "all" | "draft" | "published" | "archived";
 type BenchmarkFilter =
   | "all"
   | "timed"
@@ -304,10 +319,14 @@ function DrillCard({
   drill,
   byId,
   onPress,
+  canManage,
+  onManage,
 }: {
   drill: Drill;
   byId: Map<string, Category>;
   onPress: () => void;
+  canManage: boolean;
+  onManage: () => void;
 }) {
   // The card's left stripe mirrors the phase color (also shown in the section
   // header) so a glance down the list reinforces grouping. Drills with no
@@ -411,6 +430,56 @@ function DrillCard({
                       Bench
                     </Text>
                   </View>
+                )}
+                {drill.status === "archived" && (
+                  <View
+                    style={{
+                      paddingHorizontal: 5,
+                      paddingVertical: 1,
+                      borderRadius: 3,
+                      backgroundColor: "rgba(255, 77, 77, 0.14)",
+                    }}
+                  >
+                    <Text
+                      style={[
+                        fontStyle("bold"),
+                        {
+                          fontSize: 9,
+                          letterSpacing: 1,
+                          textTransform: "uppercase",
+                          color: colors.red.semantic,
+                        },
+                      ]}
+                    >
+                      Archived
+                    </Text>
+                  </View>
+                )}
+                {/* Manage kebab — full-access only. Nested touchable captures
+                    the press so it manages instead of opening the drill. */}
+                {canManage && (
+                  <>
+                    <View style={{ flex: 1 }} />
+                    <TouchableOpacity
+                      onPress={onManage}
+                      hitSlop={10}
+                      activeOpacity={0.6}
+                      accessibilityLabel="Manage drill"
+                      style={{
+                        width: 28,
+                        height: 28,
+                        alignItems: "center",
+                        justifyContent: "center",
+                        marginRight: -6,
+                      }}
+                    >
+                      <Ionicons
+                        name="ellipsis-horizontal"
+                        size={18}
+                        color={colors.text.muted}
+                      />
+                    </TouchableOpacity>
+                  </>
                 )}
               </View>
 
@@ -554,6 +623,14 @@ export default function DrillListScreen() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [search, setSearch] = useState("");
 
+  // Drill lifecycle management (kebab → action sheet). Delete is only
+  // reachable once a custom drill is archived, behind a type-the-name
+  // confirm — mirrors the practice list.
+  const { show: showModal, showError, modalProps } = useActionModal();
+  const [deleteTarget, setDeleteTarget] = useState<Drill | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     if (!teamId) return;
     const [categoryRowsRaw, drillsRes] = await Promise.all([
@@ -563,7 +640,7 @@ export default function DrillListScreen() {
           await supabase
             .from("team_drills")
             .select(
-              "id, drill_name, description, status, benchmark_type, benchmark_types, default_reps, default_duration_min, created_by, created_at, updated_at, team_drill_categories(category_id)"
+              "id, drill_name, description, status, preset_drill_id, benchmark_type, benchmark_types, default_reps, default_duration_min, created_by, created_at, updated_at, team_drill_categories(category_id)"
             )
             .eq("team_id", teamId)
             .order("drill_name", { ascending: true });
@@ -571,7 +648,7 @@ export default function DrillListScreen() {
           res = await supabase
             .from("team_drills")
             .select(
-              "id, drill_name, description, status, benchmark_type, default_reps, default_duration_min, created_by, created_at, updated_at, team_drill_categories(category_id)"
+              "id, drill_name, description, status, preset_drill_id, benchmark_type, default_reps, default_duration_min, created_by, created_at, updated_at, team_drill_categories(category_id)"
             )
             .eq("team_id", teamId)
             .order("drill_name", { ascending: true });
@@ -595,7 +672,12 @@ export default function DrillListScreen() {
     // Skill taxonomy links for the visible drills — drives the skill-group
     // filter + row chips. One extra round-trip; the catalog is small.
     const visibleIds = (drillsRes.data ?? [])
-      .filter((d) => d.status === "published" || d.created_by === userId)
+      .filter(
+        (d) =>
+          d.status === "published" ||
+          d.status === "archived" ||
+          d.created_by === userId
+      )
       .map((d) => d.id as string);
     const [skillsByDrill, resultsRes] = await Promise.all([
       loadDrillSkills(visibleIds),
@@ -624,6 +706,10 @@ export default function DrillListScreen() {
     const drillRows: Drill[] = (drillsRes.data ?? [])
       .filter((d) => {
         if (d.status === "published") return true;
+        // Archived drills are team-wide visible (hidden by default; surfaced
+        // via the "Archived" status filter) so any captain can unarchive/
+        // delete them.
+        if (d.status === "archived") return true;
         if (d.status === "draft") return d.created_by === userId;
         return false;
       })
@@ -675,7 +761,8 @@ export default function DrillListScreen() {
           id: d.id as string,
           name: d.drill_name as string,
           description: (d.description as string | null) ?? null,
-          status: d.status as "draft" | "published",
+          status: d.status as "draft" | "published" | "archived",
+          isPreset: (d.preset_drill_id as string | null) != null,
           benchmarkTypes,
           categoryIds: ids,
           categoryNames: names,
@@ -739,7 +826,10 @@ export default function DrillListScreen() {
     () => drills.filter((d) => d.status === "published"),
     [drills]
   );
-  const draftCount = drills.length - publishedDrills.length;
+  const draftCount = useMemo(
+    () => drills.filter((d) => d.status === "draft").length,
+    [drills]
+  );
 
   const countsBySkillGroup = useMemo(() => {
     const map = {} as Record<SkillGroup, number>;
@@ -768,8 +858,12 @@ export default function DrillListScreen() {
       const skillMatch =
         activeSkillGroup === ALL || d.skillGroups.includes(activeSkillGroup);
       const searchMatch = q.length === 0 || d.name.toLowerCase().includes(q);
+      // "all" means active drills only — archived are hidden unless the
+      // user explicitly picks the Archived status filter (mirrors web).
       const statusMatch =
-        activeStatus === "all" || d.status === activeStatus;
+        activeStatus === "all"
+          ? d.status !== "archived"
+          : d.status === activeStatus;
       const benchmarkMatch =
         activeBenchmark === "all"
           ? true
@@ -908,6 +1002,66 @@ export default function DrillListScreen() {
 
   const goToLibrary = () => {
     router.push("/drills/library" as never);
+  };
+
+  // Run a lifecycle mutation then reload the list.
+  const runManage = async (
+    fn: () => Promise<{ ok: true } | { ok: false; error: string }>,
+    failTitle: string
+  ) => {
+    const r = await fn();
+    if (!r.ok) {
+      showError(failTitle, r.error);
+      return;
+    }
+    await load();
+  };
+
+  // Open the kebab action sheet for a drill. Preset clones are removed
+  // straight from the library; custom drills archive → (unarchive | delete).
+  const manageDrill = (drill: Drill) => {
+    const actions: ActionModalConfig["actions"] = [];
+    let message: string | undefined;
+
+    if (drill.isPreset) {
+      message =
+        "This removes the drill from your team library. The preset stays available to add again.";
+      actions.push({
+        label: "Remove from library",
+        variant: "destructive",
+        onPress: () =>
+          runManage(() => deleteTeamDrill(drill.id), "Couldn't remove drill"),
+      });
+    } else if (drill.status === "archived") {
+      message =
+        "Unarchive to restore this drill (as a draft), or delete it permanently.";
+      actions.push({
+        label: "Unarchive",
+        onPress: () =>
+          runManage(
+            () => unarchiveTeamDrill(drill.id),
+            "Couldn't unarchive drill"
+          ),
+      });
+      actions.push({
+        label: "Delete permanently",
+        variant: "destructive",
+        onPress: () => {
+          setDeleteError(null);
+          setDeleteTarget(drill);
+        },
+      });
+    } else {
+      message =
+        "Drills are archived, not deleted — all data is kept. You can delete it permanently later from the archive.";
+      actions.push({
+        label: "Archive",
+        onPress: () =>
+          runManage(() => archiveTeamDrill(drill.id), "Couldn't archive drill"),
+      });
+    }
+
+    showModal({ title: drill.name, message, actions });
   };
 
   const headerPaddingTop = insets.top + spacing.md;
@@ -1297,6 +1451,8 @@ export default function DrillListScreen() {
                     drill={d}
                     byId={byId}
                     onPress={() => goToDrill(d.id)}
+                    canManage={canManage}
+                    onManage={() => manageDrill(d)}
                   />
                 ))}
               </View>
@@ -1381,6 +1537,30 @@ export default function DrillListScreen() {
         onClose={() => setSortOpen(false)}
         sortBy={sortBy}
         setSortBy={setSortBy}
+      />
+
+      <ActionModal {...modalProps} />
+
+      <DeleteConfirmModal
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        name={deleteTarget?.name ?? null}
+        noun="drill"
+        busy={deleteBusy}
+        error={deleteError}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setDeleteBusy(true);
+          setDeleteError(null);
+          const r = await deleteTeamDrill(deleteTarget.id);
+          setDeleteBusy(false);
+          if (!r.ok) {
+            setDeleteError(r.error);
+            return;
+          }
+          setDeleteTarget(null);
+          await load();
+        }}
       />
     </View>
   );
@@ -1539,6 +1719,12 @@ function FilterSheet({
             color={colors.text.subtle}
             selected={activeStatus === "draft"}
             onPress={() => setActiveStatus("draft")}
+          />
+          <PhaseChip
+            label="Archived"
+            color={colors.red.semantic}
+            selected={activeStatus === "archived"}
+            onPress={() => setActiveStatus("archived")}
           />
         </View>
       </View>
