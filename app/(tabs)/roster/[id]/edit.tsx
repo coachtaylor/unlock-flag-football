@@ -25,7 +25,7 @@ function EditPlayerScreen() {
         supabase
           .from("team_players")
           .select(
-            `id, player_name, first_name, last_name, positions, jersey_number, notes, is_captain, captain_access${
+            `id, player_name, first_name, last_name, positions, jersey_number, notes, is_captain, captain_access, user_id${
               withColor ? ", color_index" : ""
             }`
           )
@@ -51,6 +51,7 @@ function EditPlayerScreen() {
           isCaptain: data.is_captain === true,
           captainAccess:
             (data.captain_access as "full" | "view" | "none" | null) ?? null,
+          accountLinked: !!(data.user_id as string | null),
         });
       }
       setLoading(false);

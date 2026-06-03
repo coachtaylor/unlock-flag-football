@@ -9,7 +9,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "./supabase";
 import { useAuth } from "./auth-context";
-import { isFullAccess } from "./team/staff-roles";
+import { memberCanManage } from "./team/staff-roles";
 
 export type AvailableTeam = {
   id: string;
@@ -17,6 +17,7 @@ export type AvailableTeam = {
   format: string | null;
   color: string | null;
   role: string | null;
+  captainViewOnly: boolean;
 };
 
 export type TeamContextValue = {
@@ -57,7 +58,7 @@ export function TeamProvider({ children }: { children: ReactNode }) {
     async (userId: string) => {
       const { data, error } = await supabase
         .from("team_members")
-        .select("team_id, role, teams(team_name, format, team_color)")
+        .select("team_id, role, captain_view_only, teams(team_name, format, team_color)")
         .eq("user_id", userId);
 
       if (error) {
@@ -76,6 +77,7 @@ export function TeamProvider({ children }: { children: ReactNode }) {
             format: team.format ?? null,
             color: team.team_color ?? null,
             role: row.role ?? null,
+            captainViewOnly: (row.captain_view_only as boolean | null) ?? false,
           },
         ];
       });
@@ -148,7 +150,7 @@ export function TeamProvider({ children }: { children: ReactNode }) {
         teamFormat: active?.format ?? null,
         teamColor: active?.color ?? null,
         userRole: active?.role ?? null,
-        canManage: isFullAccess(active?.role),
+        canManage: memberCanManage(active?.role, active?.captainViewOnly),
         hasTeam: !!active,
         loading,
         availableTeams,

@@ -66,11 +66,21 @@ export async function loadTeamStaff(teamId: string): Promise<StaffRpcRow[]> {
   return (data as StaffRpcRow[] | null) ?? [];
 }
 
+// Fetch ONE staff member by id via get_team_member (migration 90), which has
+// NO captain exclusion — so the coach detail/edit screens resolve a real
+// team_members row instead of failing on one get_team_staff filters out.
 export async function loadTeamStaffMember(
   teamId: string,
   memberId: string,
 ): Promise<StaffProfile | null> {
-  const rows = await loadTeamStaff(teamId);
-  const row = rows.find((r) => r.member_id === memberId);
+  const { data, error } = await supabase.rpc("get_team_member", {
+    p_team_id: teamId,
+    p_member_id: memberId,
+  });
+  if (error) {
+    console.warn("[staff] get_team_member:", error.message);
+    return null;
+  }
+  const row = (Array.isArray(data) ? data[0] : data) as StaffRpcRow | undefined;
   return row ? shapeStaffRow(row) : null;
 }

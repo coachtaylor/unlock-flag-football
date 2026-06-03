@@ -35,6 +35,21 @@ export function isFullAccess(role: string | null | undefined): boolean {
   return !!role && (FULL_ACCESS_ROLES as string[]).includes(role);
 }
 
+// Whether a membership can mutate team data. A captain (role 'captain') is
+// full-access UNLESS flagged view-only — the app-side mirror of
+// get_my_writable_team_ids() (migration 90). Use this for every canManage
+// derivation instead of isFullAccess(role) alone, so a view-only captain is
+// never handed write controls. (RLS is the real gate; this keeps the UI
+// honest.) Kept in sync with the web src/lib/team/staff-roles.ts copy.
+export function memberCanManage(
+  role: string | null | undefined,
+  captainViewOnly?: boolean | null,
+): boolean {
+  if (!isFullAccess(role)) return false;
+  if (role === "captain" && captainViewOnly) return false;
+  return true;
+}
+
 export type AccessTier = "full" | "view";
 
 export type StaffRoleMeta = {

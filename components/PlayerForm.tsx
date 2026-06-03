@@ -32,6 +32,7 @@ import { capitalizeName } from "../lib/format/name";
 import { supabase } from "../lib/supabase";
 import { AthleteHero } from "./ui/AthleteHero";
 import { CaptainInvitePrompt } from "./teams/CaptainInvitePrompt";
+import { ActionModal, useActionModal } from "./ui/ActionModal";
 
 export type PlayerFormInitial = {
   id: string;
@@ -52,6 +53,10 @@ export type PlayerFormInitial = {
   // isCaptain; null otherwise. full → app login with full access,
   // view → view-only login, none → badge only (no login).
   captainAccess?: CaptainAccess | null;
+  // True when linked to a login account (team_players.user_id set) — i.e. an
+  // invited captain who accepted. Removing the captain tag from such a player
+  // revokes their access, so we confirm keep-vs-remove (migration 90).
+  accountLinked?: boolean;
 };
 
 export type CaptainAccess = "full" | "view" | "none";
@@ -116,6 +121,8 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
     access: "full" | "view";
     after: "back" | "another";
   } | null>(null);
+  // Confirm modal for revoking an invited captain's access on tag removal.
+  const { show: showModal, showError, modalProps } = useActionModal();
 
   // Load in-use jersey numbers once on mount (excluding the current player when editing).
   useEffect(() => {
@@ -194,6 +201,50 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
     return [primary, ...secondary];
   };
 
+  const buildPayload = () => ({
+    // player_name stays the canonical display field (= first [+ last]);
+    // first_name/last_name persist the structured form (migration 83) so
+    // the data matches what the web writes.
+    player_name: joinFirstLast(first, last),
+    first_name: first.trim(),
+    last_name: last.trim() || null,
+    positions: buildPositions(),
+    jersey_number: jersey.trim() || null,
+    notes: notes.trim() || null,
+    is_captain: isCaptain,
+    // Permission tier only applies to captains; cleared otherwise.
+    captain_access: isCaptain ? captainAccess : null,
+  });
+
+  // Removing a captain's tag from an account-linked captain revokes their
+  // access. keepAsPlayer=true persists the edits then drops the membership;
+  // false deletes the roster row entirely (revoke_captain_access, migration 90).
+  const revokeCaptain = async (keepAsPlayer: boolean) => {
+    if (!initial) return;
+    setSubmitting(true);
+    if (keepAsPlayer) {
+      const { error: updErr } = await supabase
+        .from("team_players")
+        .update(buildPayload())
+        .eq("id", initial.id);
+      if (updErr) {
+        setSubmitting(false);
+        showError("Couldn't save", updErr.message);
+        return;
+      }
+    }
+    const { error: rpcErr } = await supabase.rpc("revoke_captain_access", {
+      p_player_id: initial.id,
+      p_delete_player: !keepAsPlayer,
+    });
+    setSubmitting(false);
+    if (rpcErr) {
+      showError("Couldn't remove captain", rpcErr.message);
+      return;
+    }
+    router.back();
+  };
+
   const onSubmit = async (mode: "back" | "another") => {
     setError(null);
     const name = joinFirstLast(first, last);
@@ -201,22 +252,29 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
       setError("First name is required.");
       return;
     }
+
+    // Removing the captain tag from an invited captain revokes their access —
+    // confirm keep-vs-remove before saving.
+    if (isEditing && initial?.isCaptain && !isCaptain && initial.accountLinked) {
+      showModal({
+        eyebrow: "Remove captain",
+        eyebrowColor: colors.orange[400],
+        title: `Remove ${name} as captain?`,
+        message:
+          `${name} has app access as a captain. Removing the tag revokes that ` +
+          "access. Keep them on the roster as a player, or remove them entirely " +
+          "(this also deletes their benchmark history).",
+        actions: [
+          { label: "Keep as player", variant: "primary", onPress: () => revokeCaptain(true) },
+          { label: "Remove from roster", variant: "destructive", onPress: () => revokeCaptain(false) },
+        ],
+      });
+      return;
+    }
+
     setSubmitting(true);
 
-    const payload = {
-      // player_name stays the canonical display field (= first [+ last]);
-      // first_name/last_name persist the structured form (migration 83) so
-      // the data matches what the web writes.
-      player_name: name,
-      first_name: first.trim(),
-      last_name: last.trim() || null,
-      positions: buildPositions(),
-      jersey_number: jersey.trim() || null,
-      notes: notes.trim() || null,
-      is_captain: isCaptain,
-      // Permission tier only applies to captains; cleared otherwise.
-      captain_access: isCaptain ? captainAccess : null,
-    };
+    const payload = buildPayload();
 
     // A captain with full/view access needs a login → offer an invite linked
     // to their player row before leaving the form.
@@ -750,6 +808,8 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
           }}
         />
       ) : null}
+
+      <ActionModal {...modalProps} />
     </KeyboardAvoidingView>
   );
 }

@@ -2,7 +2,8 @@
 // captain is saved with full or view-only access, offer to generate an invite
 // link that grants exactly that access and links to their freshly-created
 // player row (player_id) so redeeming doesn't create a duplicate player.
-// access → role: full → 'captain' (writable), view → 'team_manager'.
+// A captain is always role 'captain'; view-only rides on captain_view_only
+// (migration 90) so they're never stored as a team manager.
 
 import { useState } from "react";
 import {
@@ -38,14 +39,16 @@ export function CaptainInvitePrompt({
   const [token, setToken] = useState<string | null>(null);
 
   const accessLabel = access === "full" ? "full access" : "view-only access";
-  const role = access === "full" ? "captain" : "team_manager";
 
   const generate = async () => {
     setError(null);
     setBusy(true);
+    // A captain is always invited as role 'captain' — view-only rides on a
+    // separate flag, so they're never stored as (or shown as) a team manager.
     const res = await createInvite({
       teamId,
-      role,
+      role: "captain",
+      captainViewOnly: access === "view",
       playerId,
       expiresInDays: 14,
     });

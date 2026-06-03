@@ -26,7 +26,7 @@ import {
 } from "../../../../../components/ui/ActionModal";
 import {
   loadTeamStaff,
-  shapeStaffRow,
+  loadTeamStaffMember,
   type StaffProfile,
 } from "../../../../../lib/team/staff-detail";
 import { removeStaff } from "../../../../../lib/team/staff-actions";
@@ -54,10 +54,14 @@ export default function CoachDetailScreen() {
       let cancelled = false;
       (async () => {
         if (!teamId || !memberId) return;
-        const rows = await loadTeamStaff(teamId);
+        // Member via get_team_member (no captain exclusion) so a real member
+        // never resolves to null; loadTeamStaff is only for the head count.
+        const [member, rows] = await Promise.all([
+          loadTeamStaffMember(teamId, memberId),
+          loadTeamStaff(teamId),
+        ]);
         if (cancelled) return;
-        const row = rows.find((r) => r.member_id === memberId);
-        setCoach(row ? shapeStaffRow(row) : null);
+        setCoach(member);
         setHeadCount(rows.filter((r) => r.role === "head_coach").length);
         setLoading(false);
       })();

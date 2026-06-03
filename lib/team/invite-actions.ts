@@ -37,6 +37,8 @@ export async function createInvite(input: {
   label?: string | null;
   expiresInDays?: number | null;
   playerId?: string | null;
+  /** Captain-only: grant view-only access (role stays 'captain'). */
+  captainViewOnly?: boolean;
 }): Promise<CreateResult> {
   let expiresAt: string | null = null;
   if (input.expiresInDays && input.expiresInDays > 0) {
@@ -52,6 +54,7 @@ export async function createInvite(input: {
     p_label: input.label ?? null,
     p_expires_at: expiresAt,
     p_player_id: input.playerId ?? null,
+    p_captain_view_only: input.role === "captain" && !!input.captainViewOnly,
   });
   if (error) return { ok: false, error: error.message };
 
