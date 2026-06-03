@@ -1,3 +1,4 @@
+import { withManageGuard } from "../../../components/RequireManage";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -10,7 +11,7 @@ import type { CategoryType } from "../../../constants/categories";
 
 type Category = { id: string; name: string; type: CategoryType | null };
 
-export default function NewDrillScreen() {
+function NewDrillScreen() {
   const insets = useSafeAreaInsets();
   const { teamId } = useTeam();
 
@@ -68,3 +69,5 @@ export default function NewDrillScreen() {
     />
   );
 }
+
+export default withManageGuard(NewDrillScreen, "/drills");

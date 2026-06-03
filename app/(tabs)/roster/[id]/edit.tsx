@@ -1,3 +1,4 @@
+import { withManageGuard } from "../../../../components/RequireManage";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
@@ -7,7 +8,7 @@ import { colors } from "../../../../constants/design";
 import { supabase } from "../../../../lib/supabase";
 import { useTeam } from "../../../../lib/team-context";
 
-export default function EditPlayerScreen() {
+function EditPlayerScreen() {
   const insets = useSafeAreaInsets();
   const { teamId } = useTeam();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -24,7 +25,7 @@ export default function EditPlayerScreen() {
         supabase
           .from("team_players")
           .select(
-            `id, player_name, positions, jersey_number, notes, is_captain${
+            `id, player_name, first_name, last_name, positions, jersey_number, notes, is_captain, captain_access${
               withColor ? ", color_index" : ""
             }`
           )
@@ -41,11 +42,15 @@ export default function EditPlayerScreen() {
         setInitial({
           id: data.id as string,
           playerName: (data.player_name as string) ?? "",
+          firstName: (data.first_name as string | null) ?? null,
+          lastName: (data.last_name as string | null) ?? null,
           positions: (data.positions as string[] | null) ?? [],
           jerseyNumber: (data.jersey_number as string | null) ?? "",
           notes: (data.notes as string | null) ?? "",
           colorIndex: (data.color_index as number | null) ?? null,
           isCaptain: data.is_captain === true,
+          captainAccess:
+            (data.captain_access as "full" | "view" | "none" | null) ?? null,
         });
       }
       setLoading(false);
@@ -74,3 +79,5 @@ export default function EditPlayerScreen() {
     <PlayerForm teamId={teamId} initial={initial} topInset={insets.top} />
   );
 }
+
+export default withManageGuard(EditPlayerScreen, "/roster");

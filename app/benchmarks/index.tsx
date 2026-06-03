@@ -302,7 +302,7 @@ function Stepper({
 export default function BenchmarksHubScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { teamId } = useTeam();
+  const { teamId, canManage } = useTeam();
   const params = useLocalSearchParams<{ drill?: string }>();
   const preselectedDrillId = (params.drill as string | undefined) ?? null;
 
@@ -497,6 +497,51 @@ export default function BenchmarksHubScreen() {
       tone: g === "qb" ? ("blue" as const) : ("orange" as const),
     }));
   }, [selectedDrill]);
+
+  // View-only members (team_manager) can't run benchmark assessments — show
+  // a read-only notice instead of the selection flow. Mirrors the web hub.
+  if (!canManage) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.surface.base }}>
+        <View
+          style={{
+            paddingTop: insets.top + spacing.md,
+            paddingHorizontal: spacing.xl,
+            paddingBottom: spacing.sm,
+          }}
+        >
+          <TouchableOpacity
+            onPress={() => router.back()}
+            accessibilityLabel="Back"
+            hitSlop={10}
+            activeOpacity={0.85}
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: radius.lg,
+              backgroundColor: colors.surface.raised,
+              borderWidth: 1,
+              borderColor: colors.border.card,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Ionicons name="chevron-back" size={18} color={colors.text.primary} />
+          </TouchableOpacity>
+        </View>
+        <View style={{ flex: 1, paddingHorizontal: spacing.xl, justifyContent: "center", gap: spacing.md }}>
+          <Text style={[fontStyle("bold"), { fontSize: 22, color: colors.text.primary }]}>
+            Benchmarks
+          </Text>
+          <Text style={[fontStyle("regular"), { fontSize: 14, lineHeight: 21, color: colors.text.secondary }]}>
+            You have view-only access to this team, so you can&rsquo;t run
+            benchmark assessments. A coach or full-access captain can log
+            results; you&rsquo;ll see them on player and dashboard views.
+          </Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface.base }}>

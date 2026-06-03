@@ -535,7 +535,7 @@ function DrillCard({
 export default function DrillListScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { teamId, teamName, teamFormat } = useTeam();
+  const { teamId, teamName, teamFormat, canManage } = useTeam();
   const { user } = useAuth();
   const userId = user?.id;
 
@@ -1005,12 +1005,14 @@ export default function DrillListScreen() {
               onPress={goToLibrary}
               accessibilityLabel="Browse preset library"
             />
-            <HeaderIconButton
-              icon="add"
-              variant="primary"
-              onPress={goToNew}
-              accessibilityLabel="Create drill"
-            />
+            {canManage && (
+              <HeaderIconButton
+                icon="add"
+                variant="primary"
+                onPress={goToNew}
+                accessibilityLabel="Create drill"
+              />
+            )}
           </View>
         </View>
 
@@ -1302,7 +1304,8 @@ export default function DrillListScreen() {
           ))
         )}
 
-        {/* Add row (footer) */}
+        {/* Add row (footer) — full-access only */}
+        {canManage && (
         <View
           style={{
             paddingHorizontal: spacing.lg,
@@ -1355,6 +1358,7 @@ export default function DrillListScreen() {
             )}
           </Pressable>
         </View>
+        )}
       </ScrollView>
 
       <FilterSheet

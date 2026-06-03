@@ -110,7 +110,7 @@ export default function PlayerDetailScreen() {
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
 
-  const { teamId } = useTeam();
+  const { teamId, canManage } = useTeam();
   const [loading, setLoading] = useState(true);
   const [player, setPlayer] = useState<Player | null>(null);
   const [grouped, setGrouped] = useState<GroupedDrill[]>([]);
@@ -838,7 +838,9 @@ export default function PlayerDetailScreen() {
           )}
         </Section>
 
-        {/* Action buttons */}
+        {/* Action buttons — full-access only (view-only members can't
+            edit, flag injuries, or change roster status) */}
+        {canManage && (
         <View
           style={{
             paddingHorizontal: 16,
@@ -982,6 +984,7 @@ export default function PlayerDetailScreen() {
             </Text>
           </TouchableOpacity>
         </View>
+        )}
       </ScrollView>
 
       {/* Mark-injured confirm — replaces the native Alert. Dark surface,

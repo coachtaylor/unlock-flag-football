@@ -92,7 +92,7 @@ export default function DrillDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { teamId } = useTeam();
+  const { teamId, canManage } = useTeam();
 
   const [loading, setLoading] = useState(true);
   const [drill, setDrill] = useState<DrillRow | null>(null);
@@ -412,7 +412,14 @@ export default function DrillDetailScreen() {
   const benchmarkCfg: BenchmarkConfig | null =
     parseBenchmarkConfig(drill.benchmark_config) ??
     benchmarkConfigFromLegacy(drill.benchmark_type, drill.benchmark_types);
-  const isBenchmarkDrill = isBenchmarkConfigured(benchmarkCfg);
+  // Source of truth for "is this a benchmark?" is benchmark_types — the flat
+  // list BOTH web and mobile write in sync. benchmark_config has different
+  // shapes per platform (mobile scope-grouped, web type-keyed), so it isn't a
+  // safe cross-app signal. This matches the web drill detail exactly, so the
+  // two can never disagree. benchmarkCfg (above) is still used to render the
+  // rich config when the drill IS a benchmark.
+  const isBenchmarkDrill =
+    (drill.benchmark_types?.length ?? 0) > 0 || !!drill.benchmark_type;
   const showRunBenchmark =
     isBenchmarkDrill && drill.status === "published";
   const isLive = drill.status === "published";
@@ -423,6 +430,11 @@ export default function DrillDetailScreen() {
   // never sits over the tab bar. Without that CTA the page can scroll to
   // its natural end (the inline delete-drill link).
   const footerReservedHeight = showRunBenchmark ? 130 : 0;
+
+  // Section numbers are assigned in render order so hiding a section (e.g. the
+  // benchmark section on a coaching-only drill) never leaves a numbering gap.
+  let _section = 0;
+  const sectionNo = () => String(++_section).padStart(2, "0");
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface.base }}>
@@ -486,25 +498,27 @@ export default function DrillDetailScreen() {
           >
             {eyebrow}
           </Text>
-          <TouchableOpacity
-            onPress={goToEdit}
-            accessibilityLabel="Edit drill"
-            hitSlop={10}
-            activeOpacity={0.6}
-          >
-            <Text
-              style={[
-                fontStyle("bold"),
-                {
-                  fontSize: 11,
-                  color: colors.lime[400],
-                  letterSpacing: 1.5,
-                },
-              ]}
+          {canManage && (
+            <TouchableOpacity
+              onPress={goToEdit}
+              accessibilityLabel="Edit drill"
+              hitSlop={10}
+              activeOpacity={0.6}
             >
-              EDIT
-            </Text>
-          </TouchableOpacity>
+              <Text
+                style={[
+                  fontStyle("bold"),
+                  {
+                    fontSize: 11,
+                    color: colors.lime[400],
+                    letterSpacing: 1.5,
+                  },
+                ]}
+              >
+                EDIT
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -520,7 +534,7 @@ export default function DrillDetailScreen() {
       >
         {/* 01 · IDENTITY */}
         <Section>
-          <NumberedEyebrow index="01" label="Identity" />
+          <NumberedEyebrow index={sectionNo()} label="Identity" />
           <View
             style={{
               flexDirection: "row",
@@ -573,7 +587,7 @@ export default function DrillDetailScreen() {
         {/* Dashboard pin toggle — only meaningful for benchmark drills, and
             only renders if the migration that added `is_dashboard_pinned` has
             shipped. */}
-        {pinSupported && isBenchmarkDrill ? (
+        {canManage && pinSupported && isBenchmarkDrill ? (
           <PinToDashboardRow
             pinned={!!drill.is_dashboard_pinned}
             count={teamPinCount}
@@ -586,7 +600,7 @@ export default function DrillDetailScreen() {
 
         {/* 02 · PHASE */}
         <Section>
-          <NumberedEyebrow index="02" label="Phase" />
+          <NumberedEyebrow index={sectionNo()} label="Phase" />
           {phaseTags.length === 0 ? (
             <EmptyText style={{ marginTop: spacing.md }}>
               No phase set.
@@ -628,7 +642,7 @@ export default function DrillDetailScreen() {
 
         {/* 03 · SKILL TAGS */}
         <Section>
-          <NumberedEyebrow index="03" label="Skill tags" />
+          <NumberedEyebrow index={sectionNo()} label="Skill tags" />
           {drillSkills.length === 0 ? (
             <EmptyText style={{ marginTop: spacing.md }}>
               No skill tags assigned.
@@ -669,7 +683,7 @@ export default function DrillDetailScreen() {
 
         {/* 04 · DESCRIPTION */}
         <Section>
-          <NumberedEyebrow index="04" label="Description" />
+          <NumberedEyebrow index={sectionNo()} label="Description" />
           {drill.description?.trim() ? (
             <Text
               style={[
@@ -691,7 +705,11 @@ export default function DrillDetailScreen() {
           )}
         </Section>
 
-        {/* 04 · BENCHMARK */}
+        {/* BENCHMARK — only rendered when the drill actually is a benchmark.
+            Coaching-only drills omit the section entirely (benchmarks are
+            configured from Edit), so the screen doesn't imply a benchmark
+            exists. */}
+        {isBenchmarkDrill ? (
         <Section>
           <View
             style={{
@@ -700,7 +718,7 @@ export default function DrillDetailScreen() {
               justifyContent: "space-between",
             }}
           >
-            <NumberedEyebrow index="05" label="Benchmark" />
+            <NumberedEyebrow index={sectionNo()} label="Benchmark" />
             {benchmarkCfg ? (
               <View
                 style={{
@@ -732,10 +750,11 @@ export default function DrillDetailScreen() {
             <BenchmarkConfigView cfg={benchmarkCfg} />
           </View>
         </Section>
+        ) : null}
 
-        {/* 06 · SETUP */}
+        {/* SETUP */}
         <Section>
-          <NumberedEyebrow index="06" label="Setup" />
+          <NumberedEyebrow index={sectionNo()} label="Setup" />
           <View style={{ marginTop: spacing.md, gap: spacing.md }}>
             {diagram ? (
               <>
@@ -806,7 +825,7 @@ export default function DrillDetailScreen() {
 
         {/* 07 · COACHING NOTES */}
         <Section>
-          <NumberedEyebrow index="07" label="Coaching notes" />
+          <NumberedEyebrow index={sectionNo()} label="Coaching notes" />
           <View style={{ marginTop: spacing.md, gap: spacing.md }}>
             <View style={{ flexDirection: "row", gap: spacing.md }}>
               <View style={{ flex: 1 }}>
@@ -891,7 +910,9 @@ export default function DrillDetailScreen() {
           </View>
         </Section>
 
-        {/* Remove drill — inline link at the bottom of the page, not sticky */}
+        {/* Remove drill — inline link at the bottom of the page, not sticky.
+            Full-access only. */}
+        {canManage && (
         <View
           style={{
             alignItems: "center",
@@ -920,10 +941,12 @@ export default function DrillDetailScreen() {
             </Text>
           </TouchableOpacity>
         </View>
+        )}
       </ScrollView>
 
-      {/* Sticky footer — only the Run benchmark CTA stays anchored */}
-      {showRunBenchmark && (
+      {/* Sticky footer — only the Run benchmark CTA stays anchored.
+          Full-access only (logging a benchmark is a write). */}
+      {canManage && showRunBenchmark && (
         <View
           style={{
             position: "absolute",

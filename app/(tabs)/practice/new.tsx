@@ -1,3 +1,4 @@
+import { withManageGuard } from "../../../components/RequireManage";
 import { useCallback, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { useFocusEffect } from "expo-router";
@@ -23,7 +24,7 @@ import {
   splitFirstLast,
 } from "../../../lib/athlete";
 
-export default function NewPracticePlanScreen() {
+function NewPracticePlanScreen() {
   const insets = useSafeAreaInsets();
   const { teamId } = useTeam();
 
@@ -180,3 +181,5 @@ export default function NewPracticePlanScreen() {
     />
   );
 }
+
+export default withManageGuard(NewPracticePlanScreen, "/practice");

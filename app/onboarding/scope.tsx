@@ -71,6 +71,13 @@ export default function OnboardingScopeScreen() {
         selected={scope === "league"}
         onPress={() => setScope("league")}
       />
+      <BigChoiceCard
+        iconName="link-outline"
+        title="Join with an invite"
+        body="A coach or captain shared an invite link with me."
+        selected={false}
+        onPress={() => router.push("/onboarding/join")}
+      />
 
       {scope ? (
         <HelperNote>

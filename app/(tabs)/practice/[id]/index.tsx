@@ -46,6 +46,7 @@ import { initialsFromName } from "../../../../lib/athlete";
 import { positionColor } from "../../../../constants/positions";
 import { fontStyle, monoStyle } from "../../../../constants/typography";
 import { supabase } from "../../../../lib/supabase";
+import { useTeam } from "../../../../lib/team-context";
 
 type PlanStatus = "draft" | "scheduled" | "live" | "completed";
 
@@ -497,6 +498,9 @@ function SkippedPill() {
 export default function PracticePlanDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  // View-only members (team_manager) can read the plan but get no edit,
+  // lifecycle, or check-in controls. Mirrors the web practice detail page.
+  const { canManage } = useTeam();
   const { id, pastdue } = useLocalSearchParams<{
     id: string;
     pastdue?: string;
@@ -1422,36 +1426,38 @@ export default function PracticePlanDetailScreen() {
           >
             {formatLongDate(plan.practiceDate)}
           </Text>
-          <TouchableOpacity
-            onPress={() =>
-              router.push(
-                (plan.status === "completed"
-                  ? `/practice/${plan.id}/log`
-                  : `/practice/${plan.id}/edit`) as never
-              )
-            }
-            accessibilityLabel={
-              plan.status === "completed" ? "Edit log" : "Edit plan"
-            }
-            hitSlop={8}
-            activeOpacity={0.8}
-            style={{
-              width: 40,
-              height: 40,
-              borderRadius: 20,
-              backgroundColor: colors.orange.tint,
-              borderWidth: 1,
-              borderColor: colors.orange.tintBorder,
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <Ionicons
-              name="create-outline"
-              size={20}
-              color={colors.orange[400]}
-            />
-          </TouchableOpacity>
+          {canManage && (
+            <TouchableOpacity
+              onPress={() =>
+                router.push(
+                  (plan.status === "completed"
+                    ? `/practice/${plan.id}/log`
+                    : `/practice/${plan.id}/edit`) as never
+                )
+              }
+              accessibilityLabel={
+                plan.status === "completed" ? "Edit log" : "Edit plan"
+              }
+              hitSlop={8}
+              activeOpacity={0.8}
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: colors.orange.tint,
+                borderWidth: 1,
+                borderColor: colors.orange.tintBorder,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Ionicons
+                name="create-outline"
+                size={20}
+                color={colors.orange[400]}
+              />
+            </TouchableOpacity>
+          )}
         </View>
         {metaLine ? (
           <Text
@@ -1611,7 +1617,8 @@ export default function PracticePlanDetailScreen() {
         {/* Check-in — pre-practice + during live. Hidden once the practice
             is completed (post-practice attendance lives in the read-only
             modal triggered from the log card below). */}
-        {(plan.status === "scheduled" || plan.status === "live") &&
+        {canManage &&
+        (plan.status === "scheduled" || plan.status === "live") &&
         attendancePlayers.length > 0 ? (
           <View style={{ marginTop: spacing["3xl"] }}>
             <View
@@ -2251,8 +2258,8 @@ export default function PracticePlanDetailScreen() {
           ) : null}
         </View>
 
-        {/* Actions */}
-        {plan.archived ? (
+        {/* Actions — full-access only (lifecycle + state changes) */}
+        {canManage && (plan.archived ? (
           <View style={{ marginTop: spacing["3xl"], gap: spacing.md }}>
             <Button
               label={busy ? "Unarchiving…" : "Unarchive"}
@@ -2316,7 +2323,7 @@ export default function PracticePlanDetailScreen() {
               variant="secondary"
             />
           </View>
-        )}
+        ))}
       </ScrollView>
 
       <PracticeAttendanceSheet

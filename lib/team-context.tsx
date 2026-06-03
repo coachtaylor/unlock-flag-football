@@ -9,6 +9,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "./supabase";
 import { useAuth } from "./auth-context";
+import { isFullAccess } from "./team/staff-roles";
 
 export type AvailableTeam = {
   id: string;
@@ -24,6 +25,8 @@ export type TeamContextValue = {
   teamFormat: string | null;
   teamColor: string | null;
   userRole: string | null;
+  /** True when the active team role can mutate team data (full-access). */
+  canManage: boolean;
   hasTeam: boolean;
   loading: boolean;
   availableTeams: AvailableTeam[];
@@ -145,6 +148,7 @@ export function TeamProvider({ children }: { children: ReactNode }) {
         teamFormat: active?.format ?? null,
         teamColor: active?.color ?? null,
         userRole: active?.role ?? null,
+        canManage: isFullAccess(active?.role),
         hasTeam: !!active,
         loading,
         availableTeams,

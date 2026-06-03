@@ -18,6 +18,7 @@ import { POSITION_SIDE } from "../../../constants/positions";
 import { fontStyle, MonoText } from "../../../constants/typography";
 import { supabase } from "../../../lib/supabase";
 import { useTeam } from "../../../lib/team-context";
+import { CoachingStaffSection } from "../../../components/teams/CoachingStaffSection";
 
 type RawPlayer = {
   id: string;
@@ -94,7 +95,7 @@ function SkeletonCard() {
 export default function RosterScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { teamId, teamName } = useTeam();
+  const { teamId, teamName, canManage } = useTeam();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -289,18 +290,40 @@ export default function RosterScreen() {
     };
   }, [players]);
 
-  const visibleOffense =
-    filter === "all" || filter === "offense"
-      ? offense
-      : filter === "prs"
-      ? offense.filter((p) => p.pr)
-      : [];
-  const visibleDefense =
-    filter === "all" || filter === "defense"
-      ? defense
-      : filter === "prs"
-      ? defense.filter((p) => p.pr)
-      : [];
+  // Active players render as ONE unified list — not split into offense /
+  // defense sections (the position-side buckets above are kept only to power
+  // the filter chips + counts). Order mirrors the web roster: captains first,
+  // then jersey number ascending (un-numbered last), name as the tiebreak.
+  const visibleMain = useMemo(() => {
+    const pool =
+      filter === "offense"
+        ? offense
+        : filter === "defense"
+        ? defense
+        : filter === "prs"
+        ? [...offense, ...defense].filter((p) => p.pr)
+        : filter === "bench"
+        ? []
+        : [...offense, ...defense]; // "all"
+    const jn = (raw: string | null): number | null => {
+      const n = parseInt(String(raw ?? "").trim(), 10);
+      return Number.isFinite(n) ? n : null;
+    };
+    return [...pool].sort((a, b) => {
+      const ac = a.isCaptain ? 0 : 1;
+      const bc = b.isCaptain ? 0 : 1;
+      if (ac !== bc) return ac - bc;
+      const an = jn(a.jerseyNumber);
+      const bn = jn(b.jerseyNumber);
+      if (an !== bn) {
+        if (an == null) return 1;
+        if (bn == null) return -1;
+        return an - bn;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }, [filter, offense, defense]);
+
   const visibleBench =
     filter === "all" || filter === "bench"
       ? bench
@@ -415,23 +438,29 @@ export default function RosterScreen() {
           >
             <Ionicons name="search" size={16} color={colors.text.primary} />
           </TouchableOpacity>
-          <TouchableOpacity
-            onPress={goToNew}
-            accessibilityLabel="Add player"
-            activeOpacity={0.85}
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: 12,
-              backgroundColor: colors.orange[500],
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <Ionicons name="add" size={18} color={colors.text.primary} />
-          </TouchableOpacity>
+          {canManage && (
+            <TouchableOpacity
+              onPress={goToNew}
+              accessibilityLabel="Add player"
+              activeOpacity={0.85}
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 12,
+                backgroundColor: colors.orange[500],
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Ionicons name="add" size={18} color={colors.text.primary} />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
+
+      {/* Coaching staff — taps through to coach profiles. Self-hides when
+          the team has no staff yet. */}
+      {teamId ? <CoachingStaffSection teamId={teamId} /> : null}
 
       {/* Squad summary strip */}
       <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
@@ -587,78 +616,80 @@ export default function RosterScreen() {
           >
             No players yet. Add your first player to start building the squad.
           </Text>
-          <TouchableOpacity
-            onPress={goToNew}
-            activeOpacity={0.9}
+          {canManage && (
+            <TouchableOpacity
+              onPress={goToNew}
+              activeOpacity={0.9}
+              style={{
+                paddingHorizontal: 18,
+                height: 44,
+                borderRadius: 12,
+                backgroundColor: colors.orange[500],
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+              }}
+            >
+              <Ionicons name="add" size={16} color={colors.text.primary} />
+              <Text
+                style={[
+                  fontStyle("bold"),
+                  {
+                    fontSize: 14,
+                    fontWeight: fontWeight.bold,
+                    color: colors.text.primary,
+                    letterSpacing: 0.2,
+                  },
+                ]}
+              >
+                Add player
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      ) : (
+        <>
+          {/* Players eyebrow — sits below the filters, labeling the list and
+              marking where players begin (vs the coaching staff above). */}
+          <View
             style={{
-              paddingHorizontal: 18,
-              height: 44,
-              borderRadius: 12,
-              backgroundColor: colors.orange[500],
+              paddingHorizontal: 16,
+              paddingTop: 16,
               flexDirection: "row",
               alignItems: "center",
-              gap: 6,
+              gap: 8,
             }}
           >
-            <Ionicons name="add" size={16} color={colors.text.primary} />
             <Text
               style={[
                 fontStyle("bold"),
                 {
-                  fontSize: 14,
+                  fontSize: 11,
                   fontWeight: fontWeight.bold,
-                  color: colors.text.primary,
-                  letterSpacing: 0.2,
+                  color: colors.text.secondary,
+                  letterSpacing: tracking.loose,
+                  textTransform: "uppercase",
                 },
               ]}
             >
-              Add player
+              Players
             </Text>
-          </TouchableOpacity>
-        </View>
-      ) : (
-        <>
-          {/* Groups */}
-          {visibleOffense.length > 0 ? (
-            <>
-              {filter === "all" ? (
-                <GroupHeader
-                  label="OFFENSE"
-                  count={visibleOffense.length}
-                  color={colors.orange[500]}
-                />
-              ) : null}
-              <View style={{ paddingHorizontal: 16, gap: 10 }}>
-                {visibleOffense.map((p) => (
-                  <PlayerCard
-                    key={p.id}
-                    player={p}
-                    onPress={() => goToPlayer(p.id)}
-                  />
-                ))}
-              </View>
-            </>
-          ) : null}
+            <MonoText weight="medium" style={{ fontSize: 11, color: colors.text.muted }}>
+              {players.length}
+            </MonoText>
+          </View>
 
-          {visibleDefense.length > 0 ? (
-            <>
-              {filter === "all" ? (
-                <GroupHeader
-                  label="DEFENSE"
-                  count={visibleDefense.length}
-                  color={colors.red.semantic}
+          {/* One unified player list (no position split). */}
+          {visibleMain.length > 0 ? (
+            <View style={{ paddingHorizontal: 16, gap: 10, paddingTop: 10 }}>
+              {visibleMain.map((p) => (
+                <PlayerCard
+                  key={p.id}
+                  player={p}
+                  onPress={() => goToPlayer(p.id)}
                 />
-              ) : null}
-              <View style={{ paddingHorizontal: 16, gap: 10 }}>
-                {visibleDefense.map((p) => (
-                  <PlayerCard
-                    key={p.id}
-                    player={p}
-                    onPress={() => goToPlayer(p.id)}
-                  />
-                ))}
-              </View>
-            </>
+              ))}
+            </View>
           ) : null}
 
           {visibleBench.length > 0 ? (
@@ -684,6 +715,7 @@ export default function RosterScreen() {
           ) : null}
 
           {/* Ghost add row */}
+          {canManage && (
           <View style={{ paddingHorizontal: 16, paddingTop: 14 }}>
             <TouchableOpacity
               onPress={goToNew}
@@ -744,6 +776,7 @@ export default function RosterScreen() {
               />
             </TouchableOpacity>
           </View>
+          )}
         </>
       )}
     </ScrollView>

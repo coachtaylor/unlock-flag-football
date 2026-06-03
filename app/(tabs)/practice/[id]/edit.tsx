@@ -1,3 +1,4 @@
+import { withManageGuard } from "../../../../components/RequireManage";
 import { useCallback, useEffect, useState } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { useFocusEffect, useLocalSearchParams } from "expo-router";
@@ -78,7 +79,7 @@ function timeForInput(t: string | null): string {
   return m ? `${m[1]}:${m[2]}` : "";
 }
 
-export default function EditPracticePlanScreen() {
+function EditPracticePlanScreen() {
   const insets = useSafeAreaInsets();
   const { teamId } = useTeam();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -409,3 +410,5 @@ export default function EditPracticePlanScreen() {
     />
   );
 }
+
+export default withManageGuard(EditPracticePlanScreen, "/practice");

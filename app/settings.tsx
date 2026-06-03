@@ -1,17 +1,60 @@
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { useEffect, useState } from "react";
+import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useRouter } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Button } from "../components/ui/Button";
 import { colors, radius, spacing } from "../constants/design";
+import { fontStyle } from "../constants/typography";
 import { useAuth } from "../lib/auth-context";
 import { useTeam } from "../lib/team-context";
+import { capitalizeName } from "../lib/format/name";
+import { supabase } from "../lib/supabase";
 
 export default function SettingsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user, signOut } = useAuth();
   const { teamName } = useTeam();
+
+  const [first, setFirst] = useState("");
+  const [last, setLast] = useState("");
+  const [savedName, setSavedName] = useState({ first: "", last: "" });
+  const [savingName, setSavingName] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!user) return;
+      const { data } = await supabase
+        .from("profiles")
+        .select("first_name, last_name")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (cancelled || !data) return;
+      const f = (data.first_name as string | null) ?? "";
+      const l = (data.last_name as string | null) ?? "";
+      setFirst(f);
+      setLast(l);
+      setSavedName({ first: f, last: l });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  const nameDirty = first.trim() !== savedName.first || last.trim() !== savedName.last;
+
+  const saveName = async () => {
+    if (!user || !first.trim() || savingName) return;
+    setSavingName(true);
+    const { error } = await supabase
+      .from("profiles")
+      .update({ first_name: first.trim(), last_name: last.trim() || null })
+      .eq("id", user.id);
+    setSavingName(false);
+    if (!error) setSavedName({ first: first.trim(), last: last.trim() });
+  };
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface.base }}>
@@ -65,6 +108,28 @@ export default function SettingsScreen() {
         }}
         showsVerticalScrollIndicator={false}
       >
+        <SettingsCard label="Profile">
+          <View style={{ padding: spacing.lg, gap: spacing.md }}>
+            <View style={{ flexDirection: "row", gap: spacing.md }}>
+              <View style={{ flex: 1, gap: 6 }}>
+                <NameLabel>First name</NameLabel>
+                <NameInput value={first} onChangeText={(v) => setFirst(capitalizeName(v))} placeholder="First" />
+              </View>
+              <View style={{ flex: 1, gap: 6 }}>
+                <NameLabel>Last name</NameLabel>
+                <NameInput value={last} onChangeText={(v) => setLast(capitalizeName(v))} placeholder="Last" />
+              </View>
+            </View>
+            <Button
+              label={savingName ? "Saving…" : "Save name"}
+              onPress={saveName}
+              disabled={!nameDirty || !first.trim() || savingName}
+            />
+          </View>
+        </SettingsCard>
+
+        <View style={{ height: spacing.lg }} />
+
         <SettingsCard label="Account">
           <RowItem
             icon="mail-outline"
@@ -125,6 +190,55 @@ function SettingsCard({
         {children}
       </View>
     </View>
+  );
+}
+
+function NameLabel({ children }: { children: string }) {
+  return (
+    <Text
+      style={{
+        fontSize: 11,
+        letterSpacing: 0.5,
+        textTransform: "uppercase",
+        color: colors.text.muted,
+        fontWeight: "500",
+      }}
+    >
+      {children}
+    </Text>
+  );
+}
+
+function NameInput({
+  value,
+  onChangeText,
+  placeholder,
+}: {
+  value: string;
+  onChangeText: (v: string) => void;
+  placeholder: string;
+}) {
+  return (
+    <TextInput
+      value={value}
+      onChangeText={onChangeText}
+      placeholder={placeholder}
+      placeholderTextColor={colors.text.muted}
+      autoCapitalize="words"
+      style={[
+        fontStyle("regular"),
+        {
+          minHeight: 44,
+          borderRadius: radius.input,
+          borderWidth: 1,
+          borderColor: colors.border.card,
+          backgroundColor: colors.surface.input,
+          color: colors.text.primary,
+          fontSize: 15,
+          paddingHorizontal: 12,
+        },
+      ]}
+    />
   );
 }
 

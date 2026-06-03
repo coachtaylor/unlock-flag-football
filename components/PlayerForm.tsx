@@ -28,12 +28,18 @@ import {
   joinFirstLast,
   splitFirstLast,
 } from "../lib/athlete";
+import { capitalizeName } from "../lib/format/name";
 import { supabase } from "../lib/supabase";
 import { AthleteHero } from "./ui/AthleteHero";
+import { CaptainInvitePrompt } from "./teams/CaptainInvitePrompt";
 
 export type PlayerFormInitial = {
   id: string;
   playerName: string;
+  // Structured name (migration 83). Preferred over splitting playerName when
+  // present so a "Mary Jane / Smith" split made on the web round-trips here.
+  firstName?: string | null;
+  lastName?: string | null;
   positions: string[];
   jerseyNumber: string;
   notes: string;
@@ -42,7 +48,19 @@ export type PlayerFormInitial = {
   // mode. Null in create mode — the helper falls back to muted.
   colorIndex: number | null;
   isCaptain: boolean;
+  // Permission tier for captains (migration 82). Only meaningful when
+  // isCaptain; null otherwise. full → app login with full access,
+  // view → view-only login, none → badge only (no login).
+  captainAccess?: CaptainAccess | null;
 };
+
+export type CaptainAccess = "full" | "view" | "none";
+
+const CAPTAIN_ACCESS_OPTIONS: { id: CaptainAccess; label: string; hint: string }[] = [
+  { id: "full", label: "Full access", hint: "Plan practices, log benchmarks, edit the roster." },
+  { id: "view", label: "View only", hint: "Can see everything, can't make changes." },
+  { id: "none", label: "No access", hint: "A captain in name only — no app login." },
+];
 
 type Props = {
   teamId: string;
@@ -61,10 +79,17 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
   // /roster/[id]/edit are both under app/(tabs)/), so this is safe.
   const tabBarHeight = useBottomTabBarHeight();
 
-  const initialFirstLast = useMemo(
-    () => splitFirstLast(initial?.playerName),
-    [initial?.playerName]
-  );
+  const initialFirstLast = useMemo(() => {
+    // Prefer the structured columns when the row has them; otherwise derive
+    // first/last from the display name (covers rows created before the split).
+    if (initial?.firstName != null || initial?.lastName != null) {
+      return {
+        first: (initial.firstName ?? "").trim(),
+        last: (initial.lastName ?? "").trim(),
+      };
+    }
+    return splitFirstLast(initial?.playerName);
+  }, [initial?.firstName, initial?.lastName, initial?.playerName]);
 
   const [first, setFirst] = useState(initialFirstLast.first);
   const [last, setLast] = useState(initialFirstLast.last);
@@ -77,9 +102,20 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
   );
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [isCaptain, setIsCaptain] = useState(initial?.isCaptain ?? false);
+  const [captainAccess, setCaptainAccess] = useState<CaptainAccess>(
+    initial?.captainAccess ?? "full"
+  );
   const [usedJerseys, setUsedJerseys] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  // After saving a captain with full/view access, prompt to generate an
+  // invite linked to their player row (mirrors the web flow). The deferred
+  // navigation runs when the prompt closes.
+  const [invitePrompt, setInvitePrompt] = useState<{
+    playerId: string;
+    access: "full" | "view";
+    after: "back" | "another";
+  } | null>(null);
 
   // Load in-use jersey numbers once on mount (excluding the current player when editing).
   useEffect(() => {
@@ -149,6 +185,7 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
     setSecondary([]);
     setNotes("");
     setIsCaptain(false);
+    setCaptainAccess("full");
     setError(null);
   };
 
@@ -167,12 +204,24 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
     setSubmitting(true);
 
     const payload = {
+      // player_name stays the canonical display field (= first [+ last]);
+      // first_name/last_name persist the structured form (migration 83) so
+      // the data matches what the web writes.
       player_name: name,
+      first_name: first.trim(),
+      last_name: last.trim() || null,
       positions: buildPositions(),
       jersey_number: jersey.trim() || null,
       notes: notes.trim() || null,
       is_captain: isCaptain,
+      // Permission tier only applies to captains; cleared otherwise.
+      captain_access: isCaptain ? captainAccess : null,
     };
+
+    // A captain with full/view access needs a login → offer an invite linked
+    // to their player row before leaving the form.
+    const wantsInvite =
+      isCaptain && (captainAccess === "full" || captainAccess === "view");
 
     if (isEditing && initial) {
       const { error: updateErr } = await supabase
@@ -185,25 +234,39 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
         setSubmitting(false);
         return;
       }
-      console.log("[player-form] updated", initial.id);
       setSubmitting(false);
+      if (wantsInvite) {
+        setInvitePrompt({
+          playerId: initial.id,
+          access: captainAccess as "full" | "view",
+          after: "back",
+        });
+        return;
+      }
       router.back();
       return;
     }
 
-    const { error: insertErr } = await supabase.from("team_players").insert({
-      ...payload,
-      team_id: teamId,
-      status: "active",
-    });
-    if (insertErr) {
-      console.warn("[player-form] insert failed:", insertErr.message);
-      setError(insertErr.message);
+    const { data: inserted, error: insertErr } = await supabase
+      .from("team_players")
+      .insert({ ...payload, team_id: teamId, status: "active" })
+      .select("id")
+      .single();
+    if (insertErr || !inserted) {
+      console.warn("[player-form] insert failed:", insertErr?.message);
+      setError(insertErr?.message ?? "Couldn't add player.");
       setSubmitting(false);
       return;
     }
-    console.log("[player-form] inserted player into team", teamId);
     setSubmitting(false);
+    if (wantsInvite) {
+      setInvitePrompt({
+        playerId: inserted.id as string,
+        access: captainAccess as "full" | "view",
+        after: mode,
+      });
+      return;
+    }
     if (mode === "another") {
       resetForm();
     } else {
@@ -327,7 +390,7 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
               <FieldLabel>First name</FieldLabel>
               <FormInput
                 value={first}
-                onChangeText={setFirst}
+                onChangeText={(v) => setFirst(capitalizeName(v))}
                 placeholder="Marcus"
                 autoCapitalize="words"
                 returnKeyType="next"
@@ -337,7 +400,7 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
               <FieldLabel>Last name</FieldLabel>
               <FormInput
                 value={last}
-                onChangeText={setLast}
+                onChangeText={(v) => setLast(capitalizeName(v))}
                 placeholder="Johnson"
                 autoCapitalize="words"
                 returnKeyType="next"
@@ -441,6 +504,72 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
               setIsCaptain(v);
             }}
           />
+
+          {isCaptain ? (
+            <View style={{ marginTop: 12, gap: 8 }}>
+              <Text
+                style={[
+                  fontStyle("medium"),
+                  {
+                    fontSize: 11,
+                    color: colors.text.label,
+                    letterSpacing: 0.5,
+                    textTransform: "uppercase",
+                  },
+                ]}
+              >
+                Captain access
+              </Text>
+              {CAPTAIN_ACCESS_OPTIONS.map((opt) => {
+                const on = captainAccess === opt.id;
+                return (
+                  <TouchableOpacity
+                    key={opt.id}
+                    onPress={() => {
+                      lightHaptic();
+                      setCaptainAccess(opt.id);
+                    }}
+                    activeOpacity={0.85}
+                    accessibilityState={{ selected: on }}
+                    style={{
+                      padding: 12,
+                      borderRadius: radius.input,
+                      borderWidth: 1,
+                      borderColor: on ? colors.orange[500] : colors.border.card,
+                      backgroundColor: on ? colors.orange.tint : colors.surface.input,
+                      gap: 3,
+                    }}
+                  >
+                    <Text
+                      style={[
+                        fontStyle("bold"),
+                        { fontSize: 14, color: on ? colors.orange[400] : colors.text.primary },
+                      ]}
+                    >
+                      {opt.label}
+                    </Text>
+                    <Text
+                      style={[
+                        fontStyle("regular"),
+                        { fontSize: 12, color: colors.text.muted, lineHeight: 16 },
+                      ]}
+                    >
+                      {opt.hint}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+              <Text
+                style={[
+                  fontStyle("regular"),
+                  { fontSize: 11.5, color: colors.text.secondary, lineHeight: 16 },
+                ]}
+              >
+                Full or view access needs the captain to have an account — send
+                them an invite from the roster to set up their login.
+              </Text>
+            </View>
+          ) : null}
         </Section>
 
         {/* 04 Notes */}
@@ -605,6 +734,22 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
           </View>
         </View>
       </View>
+
+      {invitePrompt ? (
+        <CaptainInvitePrompt
+          visible
+          teamId={teamId}
+          playerId={invitePrompt.playerId}
+          playerName={joinFirstLast(first, last) || "this captain"}
+          access={invitePrompt.access}
+          onClose={() => {
+            const after = invitePrompt.after;
+            setInvitePrompt(null);
+            if (after === "another") resetForm();
+            else router.back();
+          }}
+        />
+      ) : null}
     </KeyboardAvoidingView>
   );
 }

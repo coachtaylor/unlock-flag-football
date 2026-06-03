@@ -22,6 +22,7 @@ import { teamColorHex, type TeamColorKey } from "../constants/team-colors";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth-context";
 import { useTeam } from "../lib/team-context";
+import { memberRoleLabel } from "../lib/team/staff-roles";
 import { Eyebrow } from "../components/ui/Eyebrow";
 import { ActionModal, useActionModal } from "../components/ui/ActionModal";
 import { BackfillModal, shouldShowBackfill } from "../components/BackfillModal";
@@ -111,7 +112,7 @@ async function fetchMyTeams(userId: string): Promise<TeamRow[]> {
     .map((r) => r.team_id)
     .filter((id): id is string => typeof id === "string");
 
-  const [playersRes, practiceRes] = await Promise.all([
+  const [playersRes, practiceRes, captainRes] = await Promise.all([
     teamIds.length
       ? supabase
           .from("team_players")
@@ -127,7 +128,23 @@ async function fetchMyTeams(userId: string): Promise<TeamRow[]> {
           .eq("status", "completed")
           .order("practice_date", { ascending: false })
       : Promise.resolve({ data: [], error: null }),
+    // A user who is a captain-player on a team should read as "Captain" here,
+    // even when their app-access role is team_manager (a view-only captain).
+    // Their captain identity lives on team_players.is_captain. Mirrors the
+    // web getUserHomeData() override.
+    teamIds.length
+      ? supabase
+          .from("team_players")
+          .select("team_id")
+          .in("team_id", teamIds)
+          .eq("user_id", userId)
+          .eq("is_captain", true)
+      : Promise.resolve({ data: [], error: null }),
   ]);
+
+  const captainTeamIds = new Set(
+    ((captainRes.data ?? []) as Array<{ team_id: string }>).map((r) => r.team_id),
+  );
 
   const playerCounts = new Map<string, number>();
   for (const row of (playersRes.data ?? []) as Array<{ team_id: string }>) {
@@ -154,7 +171,9 @@ async function fetchMyTeams(userId: string): Promise<TeamRow[]> {
         name: team.team_name ?? "Untitled team",
         color: teamColorHex(team.team_color as TeamColorKey | null),
         format: team.format ?? "7v7",
-        role: (row.role as TeamRow["role"]) ?? "coach",
+        role: captainTeamIds.has(row.team_id)
+          ? "captain"
+          : (row.role as TeamRow["role"]) ?? "coach",
         players: playerCounts.get(row.team_id) ?? 0,
         lastPractice: formatLastPractice(
           lastPractice.get(row.team_id) ?? null,
@@ -934,7 +953,7 @@ function TeamRowCard({
   const isDraft = team.status === "draft";
   // Pill color: drafts get an amber "in-progress" treatment; active
   // teams keep the lime-vs-orange captain/coach distinction.
-  const pillLabel = isDraft ? "DRAFT" : team.role.toUpperCase();
+  const pillLabel = isDraft ? "DRAFT" : memberRoleLabel(team.role);
   const pillColor = isDraft
     ? colors.amber[400]
     : team.role === "captain"

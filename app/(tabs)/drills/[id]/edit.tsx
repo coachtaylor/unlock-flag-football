@@ -1,3 +1,4 @@
+import { withManageGuard } from "../../../../components/RequireManage";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Text, View } from "react-native";
 import { useLocalSearchParams } from "expo-router";
@@ -25,7 +26,7 @@ import {
 
 type Category = { id: string; name: string; type: CategoryType | null };
 
-export default function EditDrillScreen() {
+function EditDrillScreen() {
   const insets = useSafeAreaInsets();
   const { teamId } = useTeam();
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -225,3 +226,5 @@ export default function EditDrillScreen() {
     />
   );
 }
+
+export default withManageGuard(EditDrillScreen, "/drills");

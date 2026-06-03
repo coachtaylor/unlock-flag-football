@@ -1183,7 +1183,7 @@ function ScreenHeader({
   onPlan,
 }: {
   teamName: string | null;
-  onPlan: () => void;
+  onPlan?: () => void;
 }) {
   return (
     <View
@@ -1206,21 +1206,23 @@ function ScreenHeader({
           Practice
         </Text>
       </View>
-      <TouchableOpacity
-        activeOpacity={0.85}
-        onPress={onPlan}
-        accessibilityLabel="Plan a practice"
-        style={{
-          width: 36,
-          height: 36,
-          alignItems: "center",
-          justifyContent: "center",
-          borderRadius: radius.lg,
-          backgroundColor: colors.orange[500],
-        }}
-      >
-        <Ionicons name="add" size={20} color={colors.text.primary} />
-      </TouchableOpacity>
+      {onPlan && (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={onPlan}
+          accessibilityLabel="Plan a practice"
+          style={{
+            width: 36,
+            height: 36,
+            alignItems: "center",
+            justifyContent: "center",
+            borderRadius: radius.lg,
+            backgroundColor: colors.orange[500],
+          }}
+        >
+          <Ionicons name="add" size={20} color={colors.text.primary} />
+        </TouchableOpacity>
+      )}
     </View>
   );
 }
@@ -1228,7 +1230,7 @@ function ScreenHeader({
 export default function PracticeListScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { teamId, teamName } = useTeam();
+  const { teamId, teamName, canManage } = useTeam();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -1616,7 +1618,7 @@ export default function PracticeListScreen() {
           paddingTop: headerPaddingTop,
         }}
       >
-        <ScreenHeader teamName={teamName} onPlan={goToNew} />
+        <ScreenHeader teamName={teamName} onPlan={canManage ? goToNew : undefined} />
         <View
           style={{ marginTop: spacing["2xl"], paddingHorizontal: PADH, gap: spacing.sm }}
         >
@@ -1637,7 +1639,7 @@ export default function PracticeListScreen() {
           paddingTop: headerPaddingTop,
         }}
       >
-        <ScreenHeader teamName={teamName} onPlan={goToNew} />
+        <ScreenHeader teamName={teamName} onPlan={canManage ? goToNew : undefined} />
         <View
           style={{
             flex: 1,
@@ -1681,7 +1683,9 @@ export default function PracticeListScreen() {
             No practice plans yet. Plan your first practice to keep the team on
             track.
           </Text>
-          <Button label="Plan a Practice" onPress={goToNew} fullWidth={false} />
+          {canManage && (
+            <Button label="Plan a Practice" onPress={goToNew} fullWidth={false} />
+          )}
         </View>
       </View>
     );
@@ -1703,7 +1707,7 @@ export default function PracticeListScreen() {
           />
         }
       >
-        <ScreenHeader teamName={teamName} onPlan={goToNew} />
+        <ScreenHeader teamName={teamName} onPlan={canManage ? goToNew : undefined} />
 
         {cadence && (
           <CadenceStrip
@@ -1720,7 +1724,7 @@ export default function PracticeListScreen() {
             onPress={() => goToPlan(p.id)}
             onLive={() => router.push(`/practice/${p.id}/run` as never)}
             onSendToScheduled={() => sendLiveToScheduled(p.id)}
-            onManage={() => openPlanMenu(p)}
+            onManage={canManage ? () => openPlanMenu(p) : undefined}
             busy={startingId === p.id}
           />
         ))}
@@ -1746,7 +1750,7 @@ export default function PracticeListScreen() {
                 onOpen={() => goToPlan(groups.nextUp!.id)}
                 onStart={() => goToPlan(groups.nextUp!.id)}
                 onEdit={() => goToEdit(groups.nextUp!.id)}
-                onManage={() => openPlanMenu(groups.nextUp!, { duplicate: true })}
+                onManage={canManage ? () => openPlanMenu(groups.nextUp!, { duplicate: true }) : undefined}
               />
             )}
           </>
@@ -1769,7 +1773,7 @@ export default function PracticeListScreen() {
                   key={p.id}
                   plan={p}
                   onPress={() => goToPlan(p.id)}
-                  onManage={() => openPlanMenu(p)}
+                  onManage={canManage ? () => openPlanMenu(p) : undefined}
                 />
                 ))}
               </View>
@@ -1794,7 +1798,7 @@ export default function PracticeListScreen() {
                     key={p.id}
                     plan={p}
                     pastDue
-                    onManage={() => openPlanMenu(p)}
+                    onManage={canManage ? () => openPlanMenu(p) : undefined}
                     onPress={() =>
                       router.push(
                         (p.status === "live"
@@ -1826,7 +1830,7 @@ export default function PracticeListScreen() {
                   key={p.id}
                   plan={p}
                   onPress={() => goToPlan(p.id)}
-                  onManage={() => openPlanMenu(p)}
+                  onManage={canManage ? () => openPlanMenu(p) : undefined}
                 />
                 ))}
               </View>
@@ -1851,7 +1855,7 @@ export default function PracticeListScreen() {
                   key={p.id}
                   plan={p}
                   onPress={() => goToPlan(p.id)}
-                  onManage={() => openPlanMenu(p)}
+                  onManage={canManage ? () => openPlanMenu(p) : undefined}
                 />
                 ))}
               </View>
@@ -1876,7 +1880,7 @@ export default function PracticeListScreen() {
                   key={p.id}
                   plan={p}
                   onPress={() => goToPlan(p.id)}
-                  onManage={() => openPlanMenu(p)}
+                  onManage={canManage ? () => openPlanMenu(p) : undefined}
                 />
                 ))}
               </View>

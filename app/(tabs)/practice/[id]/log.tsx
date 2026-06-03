@@ -1,3 +1,4 @@
+import { withManageGuard } from "../../../../components/RequireManage";
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -364,7 +365,7 @@ function DrillRow({
   );
 }
 
-export default function PracticeLogScreen() {
+function PracticeLogScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { user } = useAuth();
@@ -1493,3 +1494,5 @@ export default function PracticeLogScreen() {
     </KeyboardAvoidingView>
   );
 }
+
+export default withManageGuard(PracticeLogScreen, "/practice");
