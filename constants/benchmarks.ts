@@ -102,6 +102,10 @@ export type PerTypeConfig = {
   attemptsPerSet?: number;
   label?: string;
   inverse?: boolean;
+  // Pass-mark threshold authored on web (e.g. "4.6"). Mobile doesn't surface
+  // a target editor yet, but parses + round-trips it so a web-authored
+  // benchmark keeps its pass mark when viewed/edited on mobile. See TD-1.
+  target?: string;
 };
 
 export type GroupConfig = {
@@ -227,6 +231,8 @@ const parseGroup = (raw: unknown): GroupConfig => {
         next.attemptsPerSet = c.attemptsPerSet;
       if (typeof c.label === "string") next.label = c.label;
       if (typeof c.inverse === "boolean") next.inverse = c.inverse;
+      if (typeof c.target === "string" && c.target.trim() !== "")
+        next.target = c.target.trim();
       perType[t] = next;
     } else {
       perType[t] = base;
