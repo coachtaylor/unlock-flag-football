@@ -44,6 +44,10 @@ if (
 
 type PlanStatus = "draft" | "scheduled" | "live" | "completed";
 
+// Practice list tabs. Up next + live ribbons sit above the tabs and always
+// show; the tabs default to Upcoming whenever the user opens Practice.
+type TabId = "upcoming" | "attention" | "draft" | "recent" | "archive";
+
 type MixSlice = { name: string; minutes: number };
 
 type PlanVM = {
@@ -495,6 +499,115 @@ function GroupHeader({
     );
   }
   return <View style={style}>{inner}</View>;
+}
+
+// ── tab bar ─────────────────────────────────────────────────────────
+// Replaces the old collapsible sections. Active tab reads white with an
+// orange underline (selected-state accent); inactive tabs are gray. The
+// Needs Attention count stays red when it has items to keep urgency. Scrolls
+// horizontally with no visible indicator so all five tabs fit any width.
+function PracticeTabBar({
+  tabs,
+  active,
+  onSelect,
+}: {
+  tabs: { id: TabId; label: string; plans: PlanVM[] }[];
+  active: TabId;
+  onSelect: (id: TabId) => void;
+}) {
+  return (
+    <View
+      style={{
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border.card,
+        marginTop: spacing.xl,
+      }}
+    >
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{
+          paddingHorizontal: PADH,
+          gap: 20,
+          alignItems: "flex-end",
+        }}
+      >
+        {tabs.map((t) => {
+          const isActive = t.id === active;
+          const isAlert = t.id === "attention" && t.plans.length > 0;
+          return (
+            <TouchableOpacity
+              key={t.id}
+              activeOpacity={0.7}
+              onPress={() => onSelect(t.id)}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: isActive }}
+              style={{
+                flexDirection: "row",
+                alignItems: "center",
+                gap: 6,
+                paddingBottom: 10,
+                borderBottomWidth: 2,
+                borderBottomColor: isActive
+                  ? colors.orange[500]
+                  : "transparent",
+                marginBottom: -1,
+              }}
+            >
+              <Text
+                style={[
+                  fontStyle("medium"),
+                  {
+                    fontSize: 13.5,
+                    color: isActive ? colors.text.primary : colors.text.muted,
+                  },
+                ]}
+              >
+                {t.label}
+              </Text>
+              {t.plans.length > 0 && (
+                <MonoText
+                  style={{
+                    fontSize: 10.5,
+                    color: isAlert ? colors.red.semantic : colors.text.muted,
+                  }}
+                >
+                  {t.plans.length}
+                </MonoText>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+    </View>
+  );
+}
+
+function EmptyTabState({ label }: { label: string }) {
+  return (
+    <View style={{ paddingHorizontal: PADH, marginTop: spacing.lg }}>
+      <View
+        style={{
+          borderWidth: 1,
+          borderColor: colors.border.subtle,
+          borderStyle: "dashed",
+          borderRadius: radius.lg,
+          paddingVertical: spacing["2xl"],
+          paddingHorizontal: spacing.xl,
+          alignItems: "center",
+        }}
+      >
+        <Text
+          style={[
+            fontStyle("regular"),
+            { fontSize: 13, color: colors.text.muted, textAlign: "center" },
+          ]}
+        >
+          No {label.toLowerCase()} practices.
+        </Text>
+      </View>
+    </View>
+  );
 }
 
 // ── cadence strip ───────────────────────────────────────────────────
@@ -1246,17 +1359,12 @@ export default function PracticeListScreen() {
   // App-styled modal (replaces native Alert.alert): drives confirms, the
   // per-card manage menu, and error messages from one shared hook.
   const { show: showModal, showError, modalProps } = useActionModal();
-  // Collapsed section keys (view-only state, like the detail page's
-  // expandable drill rows — not persisted).
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const toggleSection = (key: string) => {
+  // Which list tab is open. Up next + live ribbons live above the tabs and
+  // always show; the tabs default to Upcoming each time the screen opens.
+  const [activeTab, setActiveTab] = useState<TabId>("upcoming");
+  const selectTab = (id: TabId) => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
+    setActiveTab(id);
   };
 
   const load = useCallback(async () => {
@@ -1560,37 +1668,64 @@ export default function PracticeListScreen() {
       (b.practiceDate ?? "0000-00-00").localeCompare(
         a.practiceDate ?? "0000-00-00"
       );
-    // Archived (soft-deleted) plans live in their own bottom section and are
-    // excluded from every active group.
+    // Archived (soft-deleted) plans live in their own tab and are excluded
+    // from every active group.
     const active = plans.filter((p) => !p.archived);
     const archived = plans.filter((p) => p.archived).sort(byDateDesc);
-    // Stale scheduled/live practices (>6h past start) — surfaced separately.
+    // Stale scheduled/live practices (>6h past start) — Needs Attention tab.
     const needsAttention = active
       .filter(
         (p) => p.pastDue && (p.status === "scheduled" || p.status === "live")
       )
       .sort(byDateDesc);
     const naIds = new Set(needsAttention.map((p) => p.id));
+    // Live practices get their own always-on ribbon above the tabs.
     const live = active
       .filter((p) => p.status === "live" && !naIds.has(p.id))
       .sort(byDateDesc);
     const upcoming = active
       .filter((p) => p.status === "scheduled" && !naIds.has(p.id))
       .sort(byDateAsc);
-    const drafts = active.filter((p) => p.status === "draft").sort(byDateAsc);
+    const drafts = active
+      .filter((p) => p.status === "draft" && !naIds.has(p.id))
+      .sort(byDateAsc);
     const completed = active
       .filter((p) => p.status === "completed")
       .sort(byDateDesc);
+
+    // "Up next" = the soonest plan to act on (a scheduled or draft plan, never
+    // live/past-due/completed). Always featured above the tabs; excluded from
+    // its own tab so it isn't listed twice. Mirrors web.
+    const focusPool = [...upcoming, ...drafts].sort(byDateAsc);
+    const nextUp = focusPool[0] ?? null;
+    const nextId = nextUp?.id ?? null;
+
     return {
       needsAttention,
       live,
-      nextUp: upcoming[0] ?? null,
-      restWeek: upcoming.slice(1),
-      drafts,
+      nextUp,
+      upcomingTab: upcoming.filter((p) => p.id !== nextId),
+      draftTab: drafts.filter((p) => p.id !== nextId),
       completed,
       archived,
     };
   }, [plans]);
+
+  // Tab definitions, in display order. `completed` flags the lists that
+  // render as finished practices (Recent + Archive).
+  const tabs = useMemo<
+    { id: TabId; label: string; plans: PlanVM[] }[]
+  >(
+    () => [
+      { id: "upcoming", label: "Upcoming", plans: groups.upcomingTab },
+      { id: "attention", label: "Needs Attention", plans: groups.needsAttention },
+      { id: "draft", label: "Draft", plans: groups.draftTab },
+      { id: "recent", label: "Recent", plans: groups.completed },
+      { id: "archive", label: "Archive", plans: groups.archived },
+    ],
+    [groups],
+  );
+  const activeTabDef = tabs.find((t) => t.id === activeTab) ?? tabs[0];
 
   const cadence = useMemo(() => {
     const last4 = groups.completed.slice(0, 4);
@@ -1730,163 +1865,63 @@ export default function PracticeListScreen() {
           />
         ))}
 
+        {/* Up next — soonest plan to act on. Always shown above the tabs. */}
         {groups.nextUp && (
           <>
             <GroupHeader
               label="Up next"
               color={colors.orange[500]}
-              collapsible
-              collapsed={collapsed.has("upNext")}
-              onToggle={() => toggleSection("upNext")}
               trailing={
                 <MonoText style={{ fontSize: 10, color: colors.text.muted }}>
                   {relDay(groups.nextUp.dayOffset)}
                 </MonoText>
               }
             />
-            {!collapsed.has("upNext") && (
-              <HeroCard
-                plan={groups.nextUp}
-                starting={startingId === groups.nextUp.id}
-                onOpen={() => goToPlan(groups.nextUp!.id)}
-                onStart={() => goToPlan(groups.nextUp!.id)}
-                onEdit={() => goToEdit(groups.nextUp!.id)}
-                onManage={canManage ? () => openPlanMenu(groups.nextUp!, { duplicate: true }) : undefined}
-              />
-            )}
+            <HeroCard
+              plan={groups.nextUp}
+              starting={startingId === groups.nextUp.id}
+              onOpen={() => goToPlan(groups.nextUp!.id)}
+              onStart={() => goToPlan(groups.nextUp!.id)}
+              onEdit={() => goToEdit(groups.nextUp!.id)}
+              onManage={canManage ? () => openPlanMenu(groups.nextUp!, { duplicate: true }) : undefined}
+            />
           </>
         )}
 
-        {groups.restWeek.length > 0 && (
-          <>
-            <GroupHeader
-              label="This week"
-              count={groups.restWeek.length}
-              color={colors.text.primary}
-              collapsible
-              collapsed={collapsed.has("thisWeek")}
-              onToggle={() => toggleSection("thisWeek")}
-            />
-            {!collapsed.has("thisWeek") && (
-              <View style={{ paddingHorizontal: PADH, gap: 10 }}>
-                {groups.restWeek.map((p) => (
-                  <PlanCard
+        {/* Tabs — Upcoming opens by default. */}
+        <PracticeTabBar tabs={tabs} active={activeTab} onSelect={selectTab} />
+
+        {activeTabDef.plans.length === 0 ? (
+          <EmptyTabState label={activeTabDef.label} />
+        ) : (
+          <View
+            style={{ paddingHorizontal: PADH, gap: 10, marginTop: spacing.lg }}
+          >
+            {activeTabDef.plans.map((p) =>
+              activeTabDef.id === "attention" ? (
+                <PlanCard
+                  key={p.id}
+                  plan={p}
+                  pastDue
+                  onManage={canManage ? () => openPlanMenu(p) : undefined}
+                  onPress={() =>
+                    router.push(
+                      (p.status === "live"
+                        ? `/practice/${p.id}/run?pastdue=1`
+                        : `/practice/${p.id}?pastdue=1`) as never
+                    )
+                  }
+                />
+              ) : (
+                <PlanCard
                   key={p.id}
                   plan={p}
                   onPress={() => goToPlan(p.id)}
                   onManage={canManage ? () => openPlanMenu(p) : undefined}
                 />
-                ))}
-              </View>
+              )
             )}
-          </>
-        )}
-
-        {groups.needsAttention.length > 0 && (
-          <>
-            <GroupHeader
-              label="Needs Attention!"
-              count={groups.needsAttention.length}
-              color={colors.red.semantic}
-              collapsible
-              collapsed={collapsed.has("needsAttention")}
-              onToggle={() => toggleSection("needsAttention")}
-            />
-            {!collapsed.has("needsAttention") && (
-              <View style={{ paddingHorizontal: PADH, gap: 10 }}>
-                {groups.needsAttention.map((p) => (
-                  <PlanCard
-                    key={p.id}
-                    plan={p}
-                    pastDue
-                    onManage={canManage ? () => openPlanMenu(p) : undefined}
-                    onPress={() =>
-                      router.push(
-                        (p.status === "live"
-                          ? `/practice/${p.id}/run?pastdue=1`
-                          : `/practice/${p.id}?pastdue=1`) as never
-                      )
-                    }
-                  />
-                ))}
-              </View>
-            )}
-          </>
-        )}
-
-        {groups.drafts.length > 0 && (
-          <>
-            <GroupHeader
-              label="Drafts"
-              count={groups.drafts.length}
-              color={colors.text.muted}
-              collapsible
-              collapsed={collapsed.has("drafts")}
-              onToggle={() => toggleSection("drafts")}
-            />
-            {!collapsed.has("drafts") && (
-              <View style={{ paddingHorizontal: PADH, gap: 10 }}>
-                {groups.drafts.map((p) => (
-                  <PlanCard
-                  key={p.id}
-                  plan={p}
-                  onPress={() => goToPlan(p.id)}
-                  onManage={canManage ? () => openPlanMenu(p) : undefined}
-                />
-                ))}
-              </View>
-            )}
-          </>
-        )}
-
-        {groups.completed.length > 0 && (
-          <>
-            <GroupHeader
-              label="Recent"
-              count={groups.completed.length}
-              color={colors.blue[400]}
-              collapsible
-              collapsed={collapsed.has("recent")}
-              onToggle={() => toggleSection("recent")}
-            />
-            {!collapsed.has("recent") && (
-              <View style={{ paddingHorizontal: PADH, gap: 10 }}>
-                {groups.completed.map((p) => (
-                  <PlanCard
-                  key={p.id}
-                  plan={p}
-                  onPress={() => goToPlan(p.id)}
-                  onManage={canManage ? () => openPlanMenu(p) : undefined}
-                />
-                ))}
-              </View>
-            )}
-          </>
-        )}
-
-        {groups.archived.length > 0 && (
-          <>
-            <GroupHeader
-              label="Archived"
-              count={groups.archived.length}
-              color={colors.text.muted}
-              collapsible
-              collapsed={collapsed.has("archived")}
-              onToggle={() => toggleSection("archived")}
-            />
-            {!collapsed.has("archived") && (
-              <View style={{ paddingHorizontal: PADH, gap: 10 }}>
-                {groups.archived.map((p) => (
-                  <PlanCard
-                  key={p.id}
-                  plan={p}
-                  onPress={() => goToPlan(p.id)}
-                  onManage={canManage ? () => openPlanMenu(p) : undefined}
-                />
-                ))}
-              </View>
-            )}
-          </>
+          </View>
         )}
       </ScrollView>
 

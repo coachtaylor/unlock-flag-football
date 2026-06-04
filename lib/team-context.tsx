@@ -18,6 +18,9 @@ export type AvailableTeam = {
   color: string | null;
   role: string | null;
   captainViewOnly: boolean;
+  // How the user reaches this team. "league_admin" = they administer the
+  // team's league but have no direct team_members row — they can still manage.
+  via: "team_member" | "league_admin";
 };
 
 export type TeamContextValue = {
@@ -50,38 +53,75 @@ export function TeamProvider({ children }: { children: ReactNode }) {
     setTeamId(null);
   }, []);
 
-  // Load all team memberships for the user, then resolve which one is
-  // "active" — the previously selected team if it's still a valid
-  // membership, otherwise the first one. The active team id flows through
-  // the rest of the app via the existing `teamId` field.
+  // Load every team the user can reach — direct team_members rows PLUS all
+  // teams in leagues they administer (league_admin) — then resolve which one
+  // is "active": the previously selected team if it's still reachable,
+  // otherwise the first one. Mirrors web's getAccessibleTeams so a league
+  // admin can select and scope to a team they don't directly belong to
+  // (without this, selectTeam silently rejects those teams and every tab
+  // falls back to the user's first direct team).
   const loadTeams = useCallback(
     async (userId: string) => {
-      const { data, error } = await supabase
-        .from("team_members")
-        .select("team_id, role, captain_view_only, teams(team_name, format, team_color)")
-        .eq("user_id", userId);
+      const [memberships, adminLeagues] = await Promise.all([
+        supabase
+          .from("team_members")
+          .select("team_id, role, captain_view_only, teams(team_name, format, team_color)")
+          .eq("user_id", userId),
+        supabase
+          .from("league_members")
+          .select("league_id")
+          .eq("user_id", userId)
+          .eq("role", "league_admin"),
+      ]);
 
-      if (error) {
-        console.error("[team-context] memberships lookup failed", error);
+      if (memberships.error) {
+        console.error("[team-context] memberships lookup failed", memberships.error);
         reset();
         return;
       }
 
-      const next: AvailableTeam[] = (data ?? []).flatMap((row) => {
+      // Direct memberships first — they win over a league-admin entry for the
+      // same team (a real role beats the implicit admin one).
+      const byId = new Map<string, AvailableTeam>();
+      for (const row of memberships.data ?? []) {
         const team = Array.isArray(row.teams) ? row.teams[0] : row.teams;
-        if (!team || !row.team_id) return [];
-        return [
-          {
-            id: row.team_id,
-            name: team.team_name ?? "Untitled team",
-            format: team.format ?? null,
-            color: team.team_color ?? null,
-            role: row.role ?? null,
-            captainViewOnly: (row.captain_view_only as boolean | null) ?? false,
-          },
-        ];
-      });
+        if (!team || !row.team_id) continue;
+        byId.set(row.team_id, {
+          id: row.team_id,
+          name: team.team_name ?? "Untitled team",
+          format: team.format ?? null,
+          color: team.team_color ?? null,
+          role: row.role ?? null,
+          captainViewOnly: (row.captain_view_only as boolean | null) ?? false,
+          via: "team_member",
+        });
+      }
 
+      const adminLeagueIds = (adminLeagues.data ?? [])
+        .map((r) => r.league_id as string | null)
+        .filter((x): x is string => !!x);
+
+      if (adminLeagueIds.length > 0) {
+        const { data: leagueTeams } = await supabase
+          .from("teams")
+          .select("id, team_name, format, team_color")
+          .in("league_id", adminLeagueIds);
+        for (const t of leagueTeams ?? []) {
+          const id = t.id as string;
+          if (byId.has(id)) continue; // direct membership already recorded
+          byId.set(id, {
+            id,
+            name: (t.team_name as string) ?? "Untitled team",
+            format: (t.format as string | null) ?? null,
+            color: (t.team_color as string | null) ?? null,
+            role: null,
+            captainViewOnly: false,
+            via: "league_admin",
+          });
+        }
+      }
+
+      const next = Array.from(byId.values());
       setAvailableTeams(next);
 
       if (next.length === 0) {
@@ -150,7 +190,11 @@ export function TeamProvider({ children }: { children: ReactNode }) {
         teamFormat: active?.format ?? null,
         teamColor: active?.color ?? null,
         userRole: active?.role ?? null,
-        canManage: memberCanManage(active?.role, active?.captainViewOnly),
+        // League admins always manage; direct members only with a full-access
+        // role (mirrors web's canManageTeam).
+        canManage:
+          active?.via === "league_admin" ||
+          memberCanManage(active?.role, active?.captainViewOnly),
         hasTeam: !!active,
         loading,
         availableTeams,
