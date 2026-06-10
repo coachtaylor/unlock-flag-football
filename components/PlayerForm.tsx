@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -342,6 +341,25 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
     setPhotoUrl(null);
   };
 
+  // Tap the hero avatar → add a photo, or (when one exists) replace/remove it.
+  const onAvatarPress = () => {
+    if (!initial) return;
+    if (!photoUrl) {
+      pickPhoto();
+      return;
+    }
+    showModal({
+      eyebrow: "Player photo",
+      eyebrowColor: colors.orange[400],
+      title: "Update photo",
+      message: "Replace this player's photo or remove it.",
+      actions: [
+        { label: "Replace photo", variant: "primary", onPress: pickPhoto },
+        { label: "Remove photo", variant: "destructive", onPress: removePhoto },
+      ],
+    });
+  };
+
   const onSubmit = async (mode: "back" | "another") => {
     setError(null);
     const name = joinFirstLast(first, last);
@@ -548,22 +566,11 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
             primary={primary}
             secondary={secondary}
             eyebrow={{ label: "Live preview", color: colors.lime[400] }}
+            photoUrl={photoUrl}
+            onPressAvatar={isEditing ? onAvatarPress : undefined}
+            avatarBusy={photoBusy}
           />
         </View>
-
-        {/* Player photo — edit only (Storage path needs the player id). */}
-        {isEditing ? (
-          <View style={{ paddingHorizontal: 16, marginTop: 12 }}>
-            <PhotoRow
-              photoUrl={photoUrl}
-              initials={initials}
-              accent={accent}
-              busy={photoBusy}
-              onPick={pickPhoto}
-              onRemove={removePhoto}
-            />
-          </View>
-        ) : null}
 
         {/* 01 Identity */}
         <Section idx="01" title="Identity">
@@ -1137,115 +1144,6 @@ function FormInput({
         style,
       ]}
     />
-  );
-}
-
-// ──────────────────────────────────────────────────────────────────────
-// PHOTO ROW (edit only)
-// ──────────────────────────────────────────────────────────────────────
-
-function PhotoRow({
-  photoUrl,
-  initials,
-  accent,
-  busy,
-  onPick,
-  onRemove,
-}: {
-  photoUrl: string | null;
-  initials: string;
-  accent: string;
-  busy: boolean;
-  onPick: () => void;
-  onRemove: () => void;
-}) {
-  return (
-    <View
-      style={{
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 14,
-        padding: 14,
-        borderRadius: radius.lg,
-        borderWidth: 1,
-        borderColor: colors.border.card,
-        backgroundColor: colors.surface.raised,
-      }}
-    >
-      {photoUrl ? (
-        <Image
-          source={{ uri: photoUrl }}
-          style={{
-            width: 56,
-            height: 56,
-            borderRadius: 14,
-            borderWidth: 1,
-            borderColor: colors.border.card,
-          }}
-        />
-      ) : (
-        <View
-          style={{
-            width: 56,
-            height: 56,
-            borderRadius: 14,
-            backgroundColor: accent,
-            alignItems: "center",
-            justifyContent: "center",
-          }}
-        >
-          <MonoText weight="bold" style={{ fontSize: 18, color: colors.text.onBrand }}>
-            {initials}
-          </MonoText>
-        </View>
-      )}
-      <View style={{ flex: 1, minWidth: 0 }}>
-        <Text
-          style={[
-            fontStyle("bold"),
-            { fontSize: 14, fontWeight: fontWeight.bold, color: colors.text.primary },
-          ]}
-        >
-          Player photo
-        </Text>
-        <Text
-          style={[
-            fontStyle("regular"),
-            { fontSize: 12, color: colors.text.muted, marginTop: 2 },
-          ]}
-        >
-          {photoUrl ? "Tap change to replace it." : "Add a photo for the player card."}
-        </Text>
-      </View>
-      <View style={{ alignItems: "flex-end", gap: 6 }}>
-        <TouchableOpacity
-          onPress={onPick}
-          disabled={busy}
-          activeOpacity={0.8}
-          accessibilityLabel={photoUrl ? "Change photo" : "Add photo"}
-          style={{
-            paddingHorizontal: 12,
-            paddingVertical: 8,
-            borderRadius: radius.pill,
-            backgroundColor: colors.orange.tint,
-            borderWidth: 1,
-            borderColor: colors.orange.tintBorder,
-            opacity: busy ? 0.6 : 1,
-          }}
-        >
-          <Text style={[fontStyle("medium"), { fontSize: 12.5, color: colors.orange[400] }]}>
-            {busy ? "Uploading…" : photoUrl ? "Change" : "Add photo"}
-          </Text>
-        </TouchableOpacity>
-        {photoUrl && !busy ? (
-          <TouchableOpacity onPress={onRemove} activeOpacity={0.7} hitSlop={8}>
-            <Text style={[fontStyle("regular"), { fontSize: 11.5, color: colors.text.muted }]}>
-              Remove
-            </Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
-    </View>
   );
 }
 

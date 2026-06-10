@@ -1,4 +1,5 @@
-import { Text, View } from "react-native";
+import { ActivityIndicator, Image, Text, TouchableOpacity, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import { colors, fontWeight, radius, tracking } from "../../constants/design";
 import { fontStyle, MonoText } from "../../constants/typography";
@@ -26,6 +27,13 @@ type Props = {
    * active/inactive status (used by the read-only detail view).
    */
   eyebrow: { label: string; color: string };
+  /** Optional photo — replaces the initials avatar when set (Build 18). */
+  photoUrl?: string | null;
+  /** When set, the avatar becomes tappable (the edit form's photo affordance)
+   *  and shows a camera badge. Read-only heroes leave this undefined. */
+  onPressAvatar?: () => void;
+  /** Shows a spinner over the avatar while a photo uploads. */
+  avatarBusy?: boolean;
 };
 
 export function AthleteHero({
@@ -37,6 +45,9 @@ export function AthleteHero({
   primary,
   secondary,
   eyebrow,
+  photoUrl,
+  onPressAvatar,
+  avatarBusy,
 }: Props) {
   return (
     <View
@@ -133,30 +144,18 @@ export function AthleteHero({
       >
         {/* Avatar with jersey badge */}
         <View style={{ position: "relative" }}>
-          <LinearGradient
-            colors={[accent, accent + "cc"]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={{
-              width: AVATAR_SIZE,
-              height: AVATAR_SIZE,
-              borderRadius: AVATAR_SIZE / 2,
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            <MonoText
-              weight="bold"
-              style={{
-                fontSize: 26,
-                fontWeight: fontWeight.bold,
-                color: colors.surface.base,
-                letterSpacing: -0.6,
-              }}
+          {onPressAvatar ? (
+            <TouchableOpacity
+              onPress={onPressAvatar}
+              disabled={avatarBusy}
+              activeOpacity={0.85}
+              accessibilityLabel={photoUrl ? "Change player photo" : "Add player photo"}
             >
-              {initials}
-            </MonoText>
-          </LinearGradient>
+              <AvatarSurface photoUrl={photoUrl} initials={initials} accent={accent} />
+            </TouchableOpacity>
+          ) : (
+            <AvatarSurface photoUrl={photoUrl} initials={initials} accent={accent} />
+          )}
           {/* Inner ring shine */}
           <View
             pointerEvents="none"
@@ -171,6 +170,46 @@ export function AthleteHero({
               borderColor: "rgba(255,255,255,0.18)",
             }}
           />
+          {/* Upload spinner */}
+          {avatarBusy ? (
+            <View
+              pointerEvents="none"
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                width: AVATAR_SIZE,
+                height: AVATAR_SIZE,
+                borderRadius: AVATAR_SIZE / 2,
+                backgroundColor: "rgba(0,0,0,0.45)",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <ActivityIndicator color={colors.text.primary} />
+            </View>
+          ) : null}
+          {/* Camera affordance — only when the avatar is editable */}
+          {onPressAvatar && !avatarBusy ? (
+            <View
+              pointerEvents="none"
+              style={{
+                position: "absolute",
+                bottom: -2,
+                left: -4,
+                width: 26,
+                height: 26,
+                borderRadius: 13,
+                backgroundColor: colors.orange[500],
+                borderWidth: 2,
+                borderColor: colors.surface.base,
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Ionicons name="camera" size={13} color={colors.text.primary} />
+            </View>
+          ) : null}
           {/* Jersey badge */}
           <View
             style={{
@@ -267,6 +306,53 @@ export function AthleteHero({
         </View>
       </View>
     </View>
+  );
+}
+
+// Avatar face — the player's photo when set, else the initials-on-accent
+// gradient. Shared by the tappable (edit) and static (read) avatar paths.
+function AvatarSurface({
+  photoUrl,
+  initials,
+  accent,
+}: {
+  photoUrl?: string | null;
+  initials: string;
+  accent: string;
+}) {
+  if (photoUrl) {
+    return (
+      <Image
+        source={{ uri: photoUrl }}
+        style={{ width: AVATAR_SIZE, height: AVATAR_SIZE, borderRadius: AVATAR_SIZE / 2 }}
+      />
+    );
+  }
+  return (
+    <LinearGradient
+      colors={[accent, accent + "cc"]}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={{
+        width: AVATAR_SIZE,
+        height: AVATAR_SIZE,
+        borderRadius: AVATAR_SIZE / 2,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <MonoText
+        weight="bold"
+        style={{
+          fontSize: 26,
+          fontWeight: fontWeight.bold,
+          color: colors.surface.base,
+          letterSpacing: -0.6,
+        }}
+      >
+        {initials}
+      </MonoText>
+    </LinearGradient>
   );
 }
 
