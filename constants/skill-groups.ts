@@ -8,6 +8,8 @@
 // GROUP (not by skill name), so unlike constants/categories.ts there is no
 // name-keyed fallback to grey — every skill_group resolves to a real hue.
 
+import { POSITION_SIDE } from "./positions";
+
 export type SkillGroup = "athletic" | "offense" | "qb" | "defense" | "iq";
 
 export type SkillGroupMeta = {
@@ -113,4 +115,71 @@ export function colorForSkillGroup(id: string): string {
 
 export function tintForSkillGroup(id: string): string {
   return skillGroupMeta(id).tint;
+}
+
+// ── Position ↔ skill-group relevance + rooms (Build 17 scouting report) ───────
+// Ported from unlock-web/src/lib/drills/skill-groups.ts — keep the two in sync.
+
+// Unambiguous skill-AREA labels for the scouting surface. The short `label`s
+// ("Offense"/"Defense"/"QB") collide with the position-room names ("Receivers"/
+// "Defense"/"QB room"); these spell the skill area out so a captain reading
+// "Receivers · Weakest: Defense" can tell a skill area from a position group.
+const SKILL_AREA_LABEL: Record<SkillGroup, string> = {
+  athletic: "Athleticism",
+  offense: "Offensive skills",
+  qb: "QB skills",
+  defense: "Defensive skills",
+  iq: "Football IQ",
+};
+
+export function skillAreaLabel(id: SkillGroup): string {
+  return SKILL_AREA_LABEL[id];
+}
+
+// Which skill groups actually matter for a player's position(s). athletic + iq
+// cut across every position; the side-specific group is added per listed
+// position. A two-way player gets the union of their positions' groups.
+export function skillGroupsForPositions(
+  positions: string[] | null | undefined
+): SkillGroup[] {
+  const set = new Set<SkillGroup>(["athletic", "iq"]);
+  for (const p of positions ?? []) {
+    if (p === "QB") set.add("qb");
+    else if (POSITION_SIDE[p] === "offense") set.add("offense");
+    else if (POSITION_SIDE[p] === "defense") set.add("defense");
+  }
+  return SKILL_GROUP_META.filter((m) => set.has(m.id)).map((m) => m.id);
+}
+
+// Position "rooms" — how captains think about the roster. A player belongs to a
+// room by PRIMARY position (positions[0]); `signature` is the room's defining
+// skill group beyond the universal athletic/iq.
+export type PositionRoom = {
+  id: "qb" | "offense" | "defense";
+  label: string;
+  positions: string[];
+  signature: SkillGroup;
+};
+
+export const POSITION_ROOMS: PositionRoom[] = [
+  { id: "qb", label: "QB room", positions: ["QB"], signature: "qb" },
+  { id: "offense", label: "Receivers", positions: ["WR", "RB", "C"], signature: "offense" },
+  { id: "defense", label: "Defense", positions: ["CB", "S", "LB", "DE", "Rusher"], signature: "defense" },
+];
+
+export function roomForPrimaryPosition(
+  positions: string[] | null | undefined
+): PositionRoom | null {
+  const primary = positions?.[0];
+  if (!primary) return null;
+  return POSITION_ROOMS.find((r) => r.positions.includes(primary)) ?? null;
+}
+
+// The position room a skill group "belongs" to. athletic + iq are universal
+// (cut across every room) → null.
+export function roomIdForSkillGroup(
+  group: SkillGroup
+): PositionRoom["id"] | null {
+  const room = POSITION_ROOMS.find((r) => r.signature === group);
+  return room ? room.id : null;
 }

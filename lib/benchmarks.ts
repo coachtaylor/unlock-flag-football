@@ -255,3 +255,36 @@ export async function clearNeedsReview(
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
+
+/**
+ * Fix a fat-fingered value on an existing benchmark_results row (the scouting
+ * detail's inline correction). Mirrors web's correctBenchmarkResult: only the
+ * value columns for the row's type are patched; the team_id filter is a
+ * belt-and-suspenders guard alongside RLS. No new-result-from-memory path —
+ * capture stays in the live benchmark flow.
+ */
+export async function correctBenchmarkResult(input: {
+  resultId: string;
+  teamId: string;
+  timeSeconds?: number | null;
+  rating?: number | null;
+  madeCount?: number | null;
+  attemptsCount?: number | null;
+}): Promise<ClearReviewResult> {
+  if (!input.resultId || !input.teamId) return { ok: false, error: "Missing id." };
+
+  const patch: Record<string, number | null> = {};
+  if (input.timeSeconds !== undefined) patch.time_seconds = input.timeSeconds ?? null;
+  if (input.rating !== undefined) patch.rating = input.rating ?? null;
+  if (input.madeCount !== undefined) patch.made_count = input.madeCount ?? null;
+  if (input.attemptsCount !== undefined) patch.attempts_count = input.attemptsCount ?? null;
+  if (Object.keys(patch).length === 0) return { ok: false, error: "Nothing to update." };
+
+  const { error } = await supabase
+    .from("benchmark_results")
+    .update(patch)
+    .eq("id", input.resultId)
+    .eq("team_id", input.teamId);
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}

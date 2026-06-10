@@ -1498,7 +1498,7 @@ export default function RunPracticeScreen() {
       );
       return;
     }
-    router.push(`/benchmarks?drill=${drillId}` as never);
+    router.push(`/benchmarks/run?drill=${drillId}` as never);
   };
 
   // Start / pause the active drill's own stopwatch (whole block together).

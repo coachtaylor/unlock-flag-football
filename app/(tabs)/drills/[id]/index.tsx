@@ -253,7 +253,7 @@ export default function DrillDetailScreen() {
     if (drill) router.push(`/drills/${drill.id}/edit` as never);
   };
   const runBenchmark = () => {
-    if (drill) router.push(`/benchmarks?drill=${drill.id}` as never);
+    if (drill) router.push(`/benchmarks/run?drill=${drill.id}` as never);
   };
 
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
