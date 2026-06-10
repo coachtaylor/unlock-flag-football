@@ -25,12 +25,14 @@ import {
   type EditableResult,
   type PlayerReportCard,
 } from "../../../lib/scouting/team-scouting-data";
-import { correctBenchmarkResult } from "../../../lib/benchmarks";
+import { addBenchmarkSet, correctBenchmarkResult } from "../../../lib/benchmarks";
+import type { BenchmarkType } from "../../../constants/benchmarks";
 import { addPlayerNote } from "../../../lib/player-notes";
 import { GradeBadge } from "../../../components/scouting/GradeBadge";
 import { AthleteHero } from "../../../components/ui/AthleteHero";
 import { PlayerSkillProfileCard } from "../../../components/PlayerSkillProfileCard";
 import { Section, SectionLabel } from "../../../components/ui/FormSection";
+import { SheetContainer } from "../../../components/ui/Sheet";
 import { ActionModal, useActionModal } from "../../../components/ui/ActionModal";
 
 function valueLabel(r: EditableResult): string {
@@ -46,6 +48,61 @@ function valueLabel(r: EditableResult): string {
     default:
       return r.madeCount != null ? String(r.madeCount) : "—";
   }
+}
+
+// Direction-aware "best rep" across a drill's reps (timed = lower is better).
+function repScore(r: EditableResult): number | null {
+  switch (r.benchmarkType) {
+    case "rated":
+      return r.rating;
+    case "timed":
+      return r.timeSeconds;
+    case "pct":
+      return r.madeCount != null && r.attemptsCount ? r.madeCount / r.attemptsCount : null;
+    default:
+      return r.madeCount;
+  }
+}
+function bestResult(results: EditableResult[]): EditableResult | null {
+  const lowerBetter = results[0]?.benchmarkType === "timed";
+  let best: EditableResult | null = null;
+  let bestScore = 0;
+  for (const r of results) {
+    const s = repScore(r);
+    if (s == null) continue;
+    if (best == null || (lowerBetter ? s < bestScore : s > bestScore)) {
+      best = r;
+      bestScore = s;
+    }
+  }
+  return best;
+}
+
+const TYPE_LABEL: Record<string, string> = { rated: "RATED", timed: "TIMED", pct: "PCT", count: "COUNT" };
+function TypeChip({ type }: { type: string }) {
+  return (
+    <View
+      style={{
+        paddingHorizontal: 7,
+        paddingVertical: 3,
+        borderRadius: radius.md,
+        backgroundColor: colors.surface.input,
+        borderWidth: 1,
+        borderColor: colors.border.subtle,
+      }}
+    >
+      <Text style={[monoStyle("medium"), { fontSize: 9.5, letterSpacing: 0.6, color: colors.text.muted }]}>
+        {TYPE_LABEL[type] ?? type.toUpperCase()}
+      </Text>
+    </View>
+  );
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+function formatSessionDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  if (!y || !m || !d) return iso;
+  return `${MONTHS[m - 1]} ${d}`;
 }
 
 function NumField({
@@ -84,11 +141,15 @@ function NumField({
 
 function CorrectRow({
   result,
+  repLabel,
+  isBest = false,
   teamId,
   onSaved,
   onError,
 }: {
   result: EditableResult;
+  repLabel: string;
+  isBest?: boolean;
   teamId: string;
   onSaved: () => void;
   onError: (msg: string) => void;
@@ -140,20 +201,40 @@ function CorrectRow({
         borderTopColor: colors.border.subtle,
       }}
     >
-      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-        <Text style={[fontStyle("medium"), { fontSize: 13, color: colors.text.primary, flex: 1 }]} numberOfLines={1}>
-          {result.drillName}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
+        <Text style={[monoStyle("medium"), { fontSize: 11.5, letterSpacing: 0.3, color: colors.text.muted }]}>
+          {repLabel}
         </Text>
         {!editing ? (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.md }}>
-            <Text style={[monoStyle("medium"), { fontSize: 13, color: colors.text.secondary }]}>
+          <View style={{ flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: spacing.sm }}>
+            {isBest ? (
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: colors.lime[400] }} />
+                <Text style={[monoStyle("medium"), { fontSize: 9.5, letterSpacing: 0.5, color: colors.lime[400] }]}>
+                  BEST
+                </Text>
+              </View>
+            ) : null}
+            <Text
+              style={[
+                monoStyle("medium"),
+                { fontSize: 14, color: isBest ? colors.text.primary : colors.text.secondary },
+              ]}
+            >
               {valueLabel(result)}
             </Text>
-            <TouchableOpacity activeOpacity={0.7} onPress={() => setEditing(true)}>
-              <Text style={[fontStyle("medium"), { fontSize: 12.5, color: colors.orange[400] }]}>Edit</Text>
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => setEditing(true)}
+              hitSlop={10}
+              style={{ width: 30, height: 30, alignItems: "center", justifyContent: "center", marginRight: -6 }}
+            >
+              <Ionicons name="pencil" size={14} color={colors.text.muted} />
             </TouchableOpacity>
           </View>
-        ) : null}
+        ) : (
+          <View style={{ flex: 1 }} />
+        )}
       </View>
 
       {editing ? (
@@ -233,6 +314,37 @@ function CorrectRow({
   );
 }
 
+// Per-drill history rows. Extracted so the capped inline preview and the
+// "view all" sheet render identical markup (DRY — one source of truth).
+function HistoryDrillRow({ d }: { d: PlayerReportCard["historyDrills"][number] }) {
+  const last = d.samples[d.samples.length - 1];
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+      <Text style={[fontStyle("medium"), { fontSize: 13, color: colors.text.primary, flex: 1 }]} numberOfLines={1}>
+        {d.drillName}
+      </Text>
+      <Text style={[monoStyle("medium"), { fontSize: 12.5, color: colors.text.secondary }]}>
+        {last ? `${last.label}${d.unit}` : "—"} · {d.samples.length}×
+      </Text>
+    </View>
+  );
+}
+
+function HistoryLockedRow({ l }: { l: PlayerReportCard["historyLocked"][number] }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+      <Text style={[fontStyle(), { fontSize: 12.5, color: colors.text.muted, flex: 1 }]} numberOfLines={1}>
+        {l.drillName}
+      </Text>
+      <Text style={[fontStyle(), { fontSize: 11, color: colors.text.muted }]}>
+        {l.benchmarkType} · locked
+      </Text>
+    </View>
+  );
+}
+
+const HISTORY_PREVIEW = 6;
+
 export default function PlayerScoutDetailScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -244,6 +356,9 @@ export default function PlayerScoutDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [noteDraft, setNoteDraft] = useState("");
   const [savingNote, setSavingNote] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [addingDrill, setAddingDrill] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!teamId || !id) return;
@@ -455,54 +570,85 @@ export default function PlayerScoutDetailScreen() {
           </Section>
         ) : null}
 
-        {/* Per-drill history */}
+        {/* Per-drill history — capped preview; full list opens in a sheet so a
+            deep roster of drills doesn't bury the rest of the page. */}
         {card.historyDrills.length || card.historyLocked.length ? (
-          <Section>
-            <SectionLabel>Per-drill history</SectionLabel>
-            <View style={{ gap: spacing.sm, marginTop: 6 }}>
-              {card.historyDrills.map((d) => {
-                const last = d.samples[d.samples.length - 1];
-                return (
-                  <View
-                    key={d.key}
-                    style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}
-                  >
-                    <Text style={[fontStyle("medium"), { fontSize: 13, color: colors.text.primary, flex: 1 }]} numberOfLines={1}>
-                      {d.drillName}
-                    </Text>
-                    <Text style={[monoStyle("medium"), { fontSize: 12.5, color: colors.text.secondary }]}>
-                      {last ? `${last.label}${d.unit}` : "—"} · {d.samples.length}×
-                    </Text>
-                  </View>
-                );
-              })}
-              {card.historyLocked.map((l) => (
-                <View key={l.key} style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                  <Text style={[fontStyle(), { fontSize: 12.5, color: colors.text.muted, flex: 1 }]} numberOfLines={1}>
-                    {l.drillName}
-                  </Text>
-                  <Text style={[fontStyle(), { fontSize: 11, color: colors.text.muted }]}>
-                    {l.benchmarkType} · locked
-                  </Text>
+          (() => {
+            const totalHistory = card.historyDrills.length + card.historyLocked.length;
+            const previewDrills = card.historyDrills.slice(0, HISTORY_PREVIEW);
+            const lockedRoom = HISTORY_PREVIEW - previewDrills.length;
+            const previewLocked = lockedRoom > 0 ? card.historyLocked.slice(0, lockedRoom) : [];
+            const hidden = totalHistory - previewDrills.length - previewLocked.length;
+            return (
+              <Section>
+                <SectionLabel>Per-drill history</SectionLabel>
+                <View style={{ gap: spacing.sm, marginTop: 6 }}>
+                  {previewDrills.map((d) => (
+                    <HistoryDrillRow key={d.key} d={d} />
+                  ))}
+                  {previewLocked.map((l) => (
+                    <HistoryLockedRow key={l.key} l={l} />
+                  ))}
                 </View>
-              ))}
-            </View>
-          </Section>
+                {hidden > 0 ? (
+                  <TouchableOpacity
+                    activeOpacity={0.7}
+                    onPress={() => setHistoryOpen(true)}
+                    hitSlop={8}
+                    style={{
+                      marginTop: spacing.md,
+                      flexDirection: "row",
+                      alignItems: "center",
+                      gap: 6,
+                      alignSelf: "flex-start",
+                    }}
+                  >
+                    <Text style={[fontStyle("medium"), { fontSize: 13, color: colors.orange[400] }]}>
+                      View all {totalHistory} drills
+                    </Text>
+                    <Ionicons name="chevron-forward" size={14} color={colors.orange[400]} />
+                  </TouchableOpacity>
+                ) : null}
+              </Section>
+            );
+          })()
         ) : null}
 
-        {/* Result corrections (captain-only) */}
-        {canManage && card.editableResults.length && teamId ? (
+        {/* Benchmark sessions (captain-only) — one row per session; tap to
+            view/edit that session's results in a sheet. */}
+        {canManage && card.sessions.length && teamId ? (
           <Section>
-            <SectionLabel>Fix a result</SectionLabel>
-            <View style={{ marginTop: 2 }}>
-              {card.editableResults.map((r) => (
-                <CorrectRow
-                  key={r.id}
-                  result={r}
-                  teamId={teamId}
-                  onSaved={load}
-                  onError={(msg) => showError("Couldn't update", msg)}
-                />
+            <SectionLabel>Benchmark sessions</SectionLabel>
+            <View style={{ marginTop: 6 }}>
+              {card.sessions.map((sess) => (
+                <TouchableOpacity
+                  key={sess.date}
+                  activeOpacity={0.7}
+                  onPress={() => setSelectedDate(sess.date)}
+                  style={{
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: spacing.md,
+                    paddingVertical: spacing.md,
+                    borderTopWidth: 1,
+                    borderTopColor: colors.border.subtle,
+                  }}
+                >
+                  <View style={{ flex: 1 }}>
+                    <Text
+                      style={[fontStyle("medium"), { fontSize: 14, color: colors.text.primary }]}
+                      numberOfLines={1}
+                    >
+                      {sess.label}
+                    </Text>
+                    <Text style={[fontStyle(), { fontSize: 11.5, color: colors.text.muted, marginTop: 2 }]}>
+                      {formatSessionDate(sess.date)} · {sess.drills.length} drill
+                      {sess.drills.length === 1 ? "" : "s"} · {sess.resultCount} set
+                      {sess.resultCount === 1 ? "" : "s"}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={colors.text.muted} />
+                </TouchableOpacity>
               ))}
             </View>
           </Section>
@@ -581,6 +727,151 @@ export default function PlayerScoutDetailScreen() {
           ) : null}
         </Section>
       </ScrollView>
+
+      <SheetContainer open={selectedDate != null} onClose={() => setSelectedDate(null)}>
+        {(() => {
+          const sess = card.sessions.find((x) => x.date === selectedDate);
+          if (!sess || !teamId) return null;
+          const tid = teamId;
+          return (
+            <>
+              <View style={{ gap: 2 }}>
+                <Text style={[fontStyle("bold"), { fontSize: 16, color: colors.text.primary }]}>
+                  {sess.label}
+                </Text>
+                <Text style={[fontStyle(), { fontSize: 12, color: colors.text.muted }]}>
+                  {formatSessionDate(sess.date)} · {sess.drills.length} drill
+                  {sess.drills.length === 1 ? "" : "s"} · {sess.resultCount} set
+                  {sess.resultCount === 1 ? "" : "s"}
+                </Text>
+              </View>
+              <ScrollView
+                style={{ maxHeight: 440 }}
+                contentContainerStyle={{ gap: spacing.md }}
+                showsVerticalScrollIndicator={false}
+              >
+                {sess.drills.map((d) => {
+                  const best = bestResult(d.results);
+                  const multi = d.results.length > 1;
+                  const type = d.results[0]?.benchmarkType ?? "rated";
+                  const drillId = d.results[0]?.drillId ?? null;
+                  const adding = addingDrill === d.drillName;
+                  const onAddSet = async () => {
+                    if (!drillId || !id) return;
+                    setAddingDrill(d.drillName);
+                    const nextSet = d.results.reduce((m, r) => Math.max(m, r.setNumber), 0) + 1;
+                    const res = await addBenchmarkSet({
+                      teamId: tid,
+                      drillId,
+                      playerId: id,
+                      benchmarkType: type as BenchmarkType,
+                      assessmentDate: sess.date,
+                      setNumber: nextSet,
+                    });
+                    setAddingDrill(null);
+                    if (res.ok) load();
+                    else showError("Couldn't add set", res.error);
+                  };
+                  return (
+                    <View
+                      key={d.drillName}
+                      style={{
+                        borderRadius: radius.lg,
+                        borderWidth: 1,
+                        borderColor: colors.border.subtle,
+                        backgroundColor: colors.surface.overlay,
+                        overflow: "hidden",
+                      }}
+                    >
+                      <View
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: spacing.sm,
+                          paddingHorizontal: spacing.md,
+                          paddingVertical: spacing.sm + 2,
+                        }}
+                      >
+                        <View style={{ flex: 1, gap: 2 }}>
+                          <Text
+                            style={[fontStyle("semibold"), { fontSize: 14.5, color: colors.text.primary }]}
+                            numberOfLines={1}
+                          >
+                            {d.drillName}
+                          </Text>
+                          <Text style={[fontStyle(), { fontSize: 11, color: colors.text.muted }]}>
+                            {d.results.length} set{d.results.length === 1 ? "" : "s"}
+                            {multi && best ? ` · best ${valueLabel(best)}` : ""}
+                          </Text>
+                        </View>
+                        <TypeChip type={type} />
+                      </View>
+                      <View style={{ paddingHorizontal: spacing.md }}>
+                        {d.results.map((r) => (
+                          <CorrectRow
+                            key={r.id}
+                            result={r}
+                            repLabel={`Set ${r.setNumber}`}
+                            isBest={multi && best?.id === r.id}
+                            teamId={tid}
+                            onSaved={load}
+                            onError={(msg) => showError("Couldn't update", msg)}
+                          />
+                        ))}
+                      </View>
+                      {canManage && drillId ? (
+                        <TouchableOpacity
+                          activeOpacity={0.7}
+                          disabled={adding}
+                          onPress={onAddSet}
+                          style={{
+                            flexDirection: "row",
+                            alignItems: "center",
+                            gap: 6,
+                            paddingHorizontal: spacing.md,
+                            paddingVertical: spacing.sm + 2,
+                            borderTopWidth: 1,
+                            borderTopColor: colors.border.subtle,
+                            opacity: adding ? 0.5 : 1,
+                          }}
+                        >
+                          <Ionicons name="add" size={15} color={colors.orange[400]} />
+                          <Text style={[fontStyle("medium"), { fontSize: 12.5, color: colors.orange[400] }]}>
+                            {adding ? "Adding set…" : "Add set"}
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  );
+                })}
+              </ScrollView>
+            </>
+          );
+        })()}
+      </SheetContainer>
+
+      <SheetContainer open={historyOpen} onClose={() => setHistoryOpen(false)}>
+        <View style={{ gap: 2 }}>
+          <Text style={[fontStyle("bold"), { fontSize: 16, color: colors.text.primary }]}>
+            Per-drill history
+          </Text>
+          <Text style={[fontStyle(), { fontSize: 12, color: colors.text.muted }]}>
+            {card.historyDrills.length + card.historyLocked.length} drills · best result · reps logged
+          </Text>
+        </View>
+        <ScrollView
+          style={{ maxHeight: 440 }}
+          contentContainerStyle={{ gap: spacing.sm }}
+          showsVerticalScrollIndicator={false}
+        >
+          {card.historyDrills.map((d) => (
+            <HistoryDrillRow key={d.key} d={d} />
+          ))}
+          {card.historyLocked.map((l) => (
+            <HistoryLockedRow key={l.key} l={l} />
+          ))}
+        </ScrollView>
+      </SheetContainer>
 
       <ActionModal {...modalProps} />
     </View>

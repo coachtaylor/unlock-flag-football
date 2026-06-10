@@ -240,7 +240,6 @@ export default function ScoutingLandingScreen() {
           paddingBottom: spacing.md,
           flexDirection: "row",
           alignItems: "center",
-          justifyContent: "space-between",
         }}
       >
         <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
@@ -258,26 +257,6 @@ export default function ScoutingLandingScreen() {
             </Text>
           </View>
         </View>
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={() => router.push("/benchmarks/run" as never)}
-          style={{
-            flexDirection: "row",
-            alignItems: "center",
-            gap: 5,
-            paddingHorizontal: spacing.md,
-            paddingVertical: 8,
-            borderRadius: 999,
-            backgroundColor: colors.orange.tint,
-            borderWidth: 1,
-            borderColor: colors.orange.tintBorder,
-          }}
-        >
-          <Ionicons name="stopwatch-outline" size={14} color={colors.orange[400]} />
-          <Text style={[fontStyle("medium"), { fontSize: 12.5, color: colors.orange[400] }]}>
-            Run benchmark
-          </Text>
-        </TouchableOpacity>
       </View>
 
       {loading && !data ? (

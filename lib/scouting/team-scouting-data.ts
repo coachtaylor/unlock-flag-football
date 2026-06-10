@@ -58,10 +58,19 @@ export type EditableResult = {
   drillName: string;
   benchmarkType: string;
   assessmentDate: string;
+  setNumber: number;
   timeSeconds: number | null;
   rating: number | null;
   madeCount: number | null;
   attemptsCount: number | null;
+};
+
+export type BenchmarkSession = {
+  date: string; // assessment_date (YYYY-MM-DD) — the session proxy
+  label: string; // matched practice title, else "Benchmark session"
+  practiceId: string | null;
+  resultCount: number;
+  drills: { drillName: string; results: EditableResult[] }[];
 };
 
 export type PlayerVerdict = {
@@ -112,6 +121,7 @@ export type PlayerReportCard = {
   observations: ObservationRowData[];
   recentTags: { tag: string; count: number }[];
   editableResults: EditableResult[];
+  sessions: BenchmarkSession[];
 };
 
 export type TeamScoutingData = {
@@ -144,6 +154,7 @@ type BenchRow = {
   player_id: string;
   drill_id: string;
   assessment_date: string;
+  set_number: number | null;
   time_seconds: number | null;
   rating: number | null;
   made_count: number | null;
@@ -261,7 +272,7 @@ function buildVerdict(args: {
 // ── Main loader ──────────────────────────────────────────────────────────────
 
 export async function loadTeamScouting(teamId: string): Promise<TeamScoutingData> {
-  const [playersRes, profileRes, benchRes, notesRes, maps] = await Promise.all([
+  const [playersRes, profileRes, benchRes, notesRes, practicesRes, maps] = await Promise.all([
     supabase
       .from("team_players")
       .select("id, player_name, positions, color_index, status")
@@ -274,7 +285,7 @@ export async function loadTeamScouting(teamId: string): Promise<TeamScoutingData
     supabase
       .from("benchmark_results")
       .select(
-        "id, player_id, drill_id, assessment_date, time_seconds, rating, made_count, attempts_count, benchmark_type, tags, team_drills(id, drill_name, benchmark_type, benchmark_types)"
+        "id, player_id, drill_id, assessment_date, set_number, time_seconds, rating, made_count, attempts_count, benchmark_type, tags, team_drills(id, drill_name, benchmark_type, benchmark_types)"
       )
       .eq("team_id", teamId),
     supabase
@@ -283,6 +294,10 @@ export async function loadTeamScouting(teamId: string): Promise<TeamScoutingData
         "id, player_id, note_text, created_at, practice_plan_id, practice_plans(id, title, practice_date)"
       )
       .eq("team_id", teamId),
+    supabase
+      .from("practice_plans")
+      .select("id, title, practice_date")
+      .eq("team_id", teamId),
     loadSkillGroupMaps(supabase, teamId),
   ]);
 
@@ -290,6 +305,15 @@ export async function loadTeamScouting(teamId: string): Promise<TeamScoutingData
   const profiles = (profileRes.data ?? []) as ProfileRow[];
   const benchmarks = (benchRes.data ?? []) as BenchRow[];
   const notes = (notesRes.data ?? []) as NoteRow[];
+  const practiceByDate = new Map<string, { id: string; title: string | null }>();
+  for (const pp of (practicesRes.data ?? []) as {
+    id: string;
+    title: string | null;
+    practice_date: string;
+  }[]) {
+    if (!practiceByDate.has(pp.practice_date))
+      practiceByDate.set(pp.practice_date, { id: pp.id, title: pp.title });
+  }
 
   // Group raw rows by player once.
   const profileByPlayer = new Map<string, ProfileRow[]>();
@@ -382,12 +406,44 @@ export async function loadTeamScouting(teamId: string): Promise<TeamScoutingData
         drillName: d?.drill_name ?? "Drill",
         benchmarkType: b.benchmark_type ?? d?.benchmark_type ?? "rated",
         assessmentDate: b.assessment_date,
+        setNumber: b.set_number ?? 1,
         timeSeconds: b.time_seconds,
         rating: b.rating,
         madeCount: b.made_count,
         attemptsCount: b.attempts_count,
       };
     });
+
+    // Sessions — group this player's results by assessment date (the session
+    // proxy; benchmark_results has no practice FK), newest first; each session's
+    // results grouped by drill. label = matched practice title for that date.
+    const resultsByDate = new Map<string, EditableResult[]>();
+    for (const r of editableResults) {
+      const arr = resultsByDate.get(r.assessmentDate) ?? [];
+      arr.push(r);
+      resultsByDate.set(r.assessmentDate, arr);
+    }
+    const sessions: BenchmarkSession[] = Array.from(resultsByDate.entries())
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([date, results]) => {
+        const pr = practiceByDate.get(date) ?? null;
+        const byDrill = new Map<string, EditableResult[]>();
+        for (const r of results) {
+          const arr = byDrill.get(r.drillName) ?? [];
+          arr.push(r);
+          byDrill.set(r.drillName, arr);
+        }
+        return {
+          date,
+          label: pr?.title ?? "Benchmark session",
+          practiceId: pr?.id ?? null,
+          resultCount: results.length,
+          drills: Array.from(byDrill.entries()).map(([drillName, rs]) => ({
+            drillName,
+            results: rs.slice().sort((a, b) => a.setNumber - b.setNumber),
+          })),
+        };
+      });
 
     // Observations.
     const observations: ObservationRowData[] = playerNotes
@@ -440,6 +496,7 @@ export async function loadTeamScouting(teamId: string): Promise<TeamScoutingData
       observations,
       recentTags,
       editableResults,
+      sessions,
     };
   });
 

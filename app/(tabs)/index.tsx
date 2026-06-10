@@ -53,6 +53,7 @@ import { AvatarStack } from "../../components/ui/AvatarStack";
 import { CategoryDonut } from "../../components/ui/CategoryDonut";
 import { CategoryWeeklyMini } from "../../components/ui/CategoryWeeklyMini";
 import { Move as MoveCard } from "../../components/ui/Move";
+import { ScoutingEntryCard } from "../../components/ui/ScoutingEntryCard";
 import { Pill } from "../../components/ui/Pill";
 import { Spark } from "../../components/ui/Spark";
 import { StreakRow } from "../../components/ui/StreakRow";
@@ -341,7 +342,7 @@ export default function DashboardScreen() {
 
     // Milestone counts (only NON-captain players for the roster milestone — see
     // commentary in the old build).
-    const [pc, dc, bc, prc, completedRes, lastBenchRes] = await Promise.all([
+    const [pc, dc, bc, prc, completedRes] = await Promise.all([
       supabase
         .from("team_players")
         .select("id", { count: "exact", head: true })
@@ -366,13 +367,6 @@ export default function DashboardScreen() {
         .select("id", { count: "exact", head: true })
         .eq("team_id", teamId)
         .eq("status", "completed"),
-      supabase
-        .from("benchmark_results")
-        .select("created_at")
-        .eq("team_id", teamId)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle(),
     ]);
 
     if (pc.error) console.warn("[dashboard] players:", pc.error.message);
@@ -406,7 +400,6 @@ export default function DashboardScreen() {
     setMoves(
       deriveMoves({
         nextPractice: npRes,
-        lastBenchmarkAt: lastBenchRes.data?.created_at ?? null,
         practicesCompletedCount: completedRes.count ?? 0,
       })
     );
@@ -613,6 +606,10 @@ export default function DashboardScreen() {
           {/* Needs-review backlog (Build 14f) — only renders when > 0. */}
           <NeedsReviewLink teamId={teamId} style={{ marginTop: 12 }} />
 
+          <View style={{ marginTop: 28 }}>
+            <ScoutingEntryCard onPress={() => navigate("/benchmarks")} />
+          </View>
+
           <SectionEyebrow
             label="Team Pulse"
             sub="Averages on your pinned benchmark drills."
@@ -665,10 +662,10 @@ export default function DashboardScreen() {
             label="This week's moves"
             sub={
               nextPractice
-                ? `Three things to lock in before ${formatShortDate(
+                ? `${(["", "One", "Two", "Three", "Four"][moves.length] ?? String(moves.length))} things to lock in before ${formatShortDate(
                     nextPractice.practice_date
                   )}.`
-                : "Three things to keep you moving."
+                : `${(["", "One", "Two", "Three", "Four"][moves.length] ?? String(moves.length))} things to keep you moving.`
             }
           />
           <View style={{ gap: 10 }}>
@@ -1251,15 +1248,16 @@ function TeamPulseCard({
               : "No PRs logged this week."}
           </Text>
         </View>
-        <Pressable
+        <TouchableOpacity
           onPress={onOpenCombine}
           hitSlop={6}
-          style={({ pressed }) => ({
+          activeOpacity={0.7}
+          style={{
             flexDirection: "row",
             alignItems: "center",
             gap: 4,
-            opacity: pressed ? 0.7 : 1,
-          })}
+            flexShrink: 0,
+          }}
         >
           <Text
             style={[
@@ -1278,7 +1276,7 @@ function TeamPulseCard({
             size={11}
             color={colors.orange[500]}
           />
-        </Pressable>
+        </TouchableOpacity>
       </View>
     </CardShell>
   );
@@ -1315,7 +1313,7 @@ function PulseTile({
             fontWeight: fontWeight.bold,
             color: colors.text.primary,
             letterSpacing: tracking.tight,
-            lineHeight: 28,
+            lineHeight: 34,
           }}
         >
           {value}

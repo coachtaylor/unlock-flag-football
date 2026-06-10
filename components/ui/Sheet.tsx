@@ -1,5 +1,5 @@
 import React from "react";
-import { Modal, Pressable, Text, View } from "react-native";
+import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors, spacing } from "../../constants/design";
 import { fontStyle } from "../../constants/typography";
@@ -26,17 +26,18 @@ export function SheetContainer({
       animationType="slide"
       onRequestClose={onClose}
     >
-      <Pressable
-        onPress={onClose}
-        style={{
-          flex: 1,
-          backgroundColor: colors.scrim,
-          justifyContent: "flex-end",
-        }}
-      >
+      {/* Scrim sits BEHIND the panel as a sibling (not a parent) so the panel
+          is a plain View — a Pressable parent would claim the touch responder
+          and a nested ScrollView would never scroll. Taps on the visible scrim
+          above the panel close; taps inside the panel do nothing. */}
+      <View style={{ flex: 1, justifyContent: "flex-end" }}>
         <Pressable
-          onPress={(e) => e.stopPropagation()}
+          onPress={onClose}
+          style={[StyleSheet.absoluteFill, { backgroundColor: colors.scrim }]}
+        />
+        <View
           style={{
+            maxHeight: "88%",
             backgroundColor: colors.surface.raised,
             borderTopLeftRadius: 20,
             borderTopRightRadius: 20,
@@ -58,8 +59,8 @@ export function SheetContainer({
             }}
           />
           {children}
-        </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }

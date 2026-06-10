@@ -288,3 +288,39 @@ export async function correctBenchmarkResult(input: {
   if (error) return { ok: false, error: error.message };
   return { ok: true };
 }
+
+/**
+ * Add another set to a drill already run this session — drills are run 2-3 sets
+ * deep, so the scouting sheet needs to grow the set list, not just correct one
+ * value. Inserts a blank benchmark_results row at the given set_number (caller
+ * passes max existing + 1) via the canonical upsert path; the captain then fills
+ * the value through the normal inline editor. assessed_by = current user.
+ */
+export async function addBenchmarkSet(input: {
+  teamId: string;
+  drillId: string;
+  playerId: string;
+  benchmarkType: BenchmarkType;
+  assessmentDate: string;
+  setNumber: number;
+}): Promise<ClearReviewResult> {
+  if (!input.teamId || !input.drillId || !input.playerId) {
+    return { ok: false, error: "Missing id." };
+  }
+  const { data: auth } = await supabase.auth.getUser();
+  const uid = auth.user?.id;
+  if (!uid) return { ok: false, error: "Not signed in." };
+
+  const { error } = await upsertBenchmarkResult({
+    team_id: input.teamId,
+    drill_id: input.drillId,
+    player_id: input.playerId,
+    assessed_by: uid,
+    assessment_date: input.assessmentDate,
+    benchmark_type: input.benchmarkType,
+    set_number: input.setNumber,
+    entry_mode: "benchmark",
+  });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}

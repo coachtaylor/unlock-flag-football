@@ -1008,15 +1008,10 @@ export async function fetchPrsThisWeek(
 
 export function deriveMoves(input: {
   nextPractice: NextPractice;
-  lastBenchmarkAt: string | null;
   practicesCompletedCount: number;
 }): Move[] {
-  const { nextPractice, lastBenchmarkAt, practicesCompletedCount } = input;
+  const { nextPractice, practicesCompletedCount } = input;
 
-  const weekStart = startOfIsoWeek(new Date()).toISOString();
-  const benchedThisWeek = !!lastBenchmarkAt && lastBenchmarkAt >= weekStart;
-
-  // 02: next practice exists?
   const nextExists = !!nextPractice;
   // 03: roster confirmed = every attendee has rsvp = true on the next practice
   const rosterConfirmed =
@@ -1026,21 +1021,14 @@ export function deriveMoves(input: {
       ? `${nextPractice.committed} of ${nextPractice.total} confirmed`
       : "No upcoming practice";
 
+  // Scouting/benchmarking is NOT a weekly chore — it's a persistent intelligence
+  // surface, so it lives in its own dashboard entry (ScoutingEntryCard), not in
+  // this to-do list. These moves are genuine time-boxed tasks for the next
+  // practice only.
   return [
     {
-      key: "benchmark",
-      index: "01",
-      title: "Run a benchmark",
-      desc: benchedThisWeek
-        ? "You already logged a benchmark this week."
-        : "Set baselines on your pinned drills.",
-      cta: "Start a benchmark",
-      href: "/benchmarks",
-      done: benchedThisWeek,
-    },
-    {
       key: "practice",
-      index: "02",
+      index: "01",
       title: nextExists ? `Lock in ${nextPractice!.title ?? "your next practice"}` : "Plan your next practice",
       desc: nextExists
         ? "Drills, time blocks, and notes."
@@ -1051,7 +1039,7 @@ export function deriveMoves(input: {
     },
     {
       key: "roster",
-      index: "03",
+      index: "02",
       title: "Confirm roster",
       desc: rosterCounts,
       cta: "Nudge pending",
