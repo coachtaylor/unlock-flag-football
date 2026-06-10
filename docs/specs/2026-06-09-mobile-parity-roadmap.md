@@ -70,6 +70,22 @@ reused verbatim by #2.
 
 ## 2. Player Card *(reuses #1's grade lib)*
 
+> **✅ SHIPPED 2026-06-10** — branch `build-18-player-card`. Redesigned the roster
+> detail (`app/(tabs)/roster/[id]/index.tsx`) into a Player Card: new
+> `components/roster/PlayerCardHero.tsx` (photo/physicals identity + overall grade
+> badge + per-group chips + relative standing + mini-stats), driven by the SHARED
+> graders run on a per-player + cohort fetch (mirrors web's roster page — not
+> `loadTeamScouting` — so it works for inactive players and never drifts). Deep
+> evidence (per-drill history/trend/sessions/corrections) stays on the scouting
+> detail, reached via a "View full scouting" bridge. DRY extractions:
+> `components/scouting/{GroupGradesRow,RelativeStandingLine}.tsx` (scouting screen
+> refactored onto `GroupGradesRow`) + `GradeBadge` gained an `lg` solid variant.
+> Photo + physicals: new `lib/photo-upload.ts` (Storage `player-photos`,
+> `fetch().arrayBuffer()` upload) + `lib/format/physicals.ts` (verbatim web port,
+> keep-in-sync) + `expo-image-picker` wired into the edit form (photo on edit only;
+> height/weight on new+edit). Spec: `docs/specs/2026-06-10-player-card-design.md`.
+> `tsc --noEmit` clean; device smoke (photo pick) still pending. **No new SQL.**
+
 **Web.** Player detail → Player Card: photo/physicals hero, headline grade +
 relative-standing verdict, collapsible sections, trend rows.
 `gradePlayerGroups` + `relativeStandingFor` in `src/lib/scouting/player-grade.ts`

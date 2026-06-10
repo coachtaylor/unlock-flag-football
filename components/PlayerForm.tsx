@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  Image,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -33,6 +34,9 @@ import { supabase } from "../lib/supabase";
 import { AthleteHero } from "./ui/AthleteHero";
 import { CaptainInvitePrompt } from "./teams/CaptainInvitePrompt";
 import { ActionModal, useActionModal } from "./ui/ActionModal";
+import * as ImagePicker from "expo-image-picker";
+import { uploadPlayerPhoto } from "../lib/photo-upload";
+import { feetInchesToInches, inchesToFeetInches } from "../lib/format/physicals";
 
 export type PlayerFormInitial = {
   id: string;
@@ -57,6 +61,12 @@ export type PlayerFormInitial = {
   // invited captain who accepted. Removing the captain tag from such a player
   // revokes their access, so we confirm keep-vs-remove (migration 90).
   accountLinked?: boolean;
+  // Player-card physicals + photo (migration 101). The edit form prefills these;
+  // height is stored as total inches. Photo is uploaded/saved on pick (edit mode
+  // only — the Storage path needs the player id).
+  photoUrl?: string | null;
+  heightIn?: number | null;
+  weightLb?: number | null;
 };
 
 export type CaptainAccess = "full" | "view" | "none";
@@ -106,6 +116,19 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
     (initial?.positions ?? []).slice(1, 3)
   );
   const [notes, setNotes] = useState(initial?.notes ?? "");
+  // Physicals + photo (migration 101). Height split into feet/inches inputs.
+  const initFeet = inchesToFeetInches(initial?.heightIn ?? null);
+  const [photoUrl, setPhotoUrl] = useState<string | null>(initial?.photoUrl ?? null);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const [heightFt, setHeightFt] = useState(
+    initFeet.feet != null ? String(initFeet.feet) : ""
+  );
+  const [heightInch, setHeightInch] = useState(
+    initFeet.inches != null ? String(initFeet.inches) : ""
+  );
+  const [weight, setWeight] = useState(
+    initial?.weightLb != null ? String(initial.weightLb) : ""
+  );
   const [isCaptain, setIsCaptain] = useState(initial?.isCaptain ?? false);
   const [captainAccess, setCaptainAccess] = useState<CaptainAccess>(
     initial?.captainAccess ?? "full"
@@ -191,6 +214,9 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
     setPrimary(null);
     setSecondary([]);
     setNotes("");
+    setHeightFt("");
+    setHeightInch("");
+    setWeight("");
     setIsCaptain(false);
     setCaptainAccess("full");
     setError(null);
@@ -200,6 +226,13 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
     if (!primary) return secondary.length > 0 ? secondary : null;
     return [primary, ...secondary];
   };
+
+  // Total inches from the feet/inches inputs (null when both blank).
+  const parsedHeightIn = () =>
+    feetInchesToInches(
+      heightFt.trim() ? parseInt(heightFt, 10) : null,
+      heightInch.trim() ? parseInt(heightInch, 10) : null
+    );
 
   const buildPayload = () => ({
     // player_name stays the canonical display field (= first [+ last]);
@@ -214,6 +247,9 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
     is_captain: isCaptain,
     // Permission tier only applies to captains; cleared otherwise.
     captain_access: isCaptain ? captainAccess : null,
+    // Physicals (migration 101) — null when blank.
+    height_in: parsedHeightIn(),
+    weight_lb: weight.trim() ? parseInt(weight, 10) : null,
   });
 
   // Removing a captain's tag from an account-linked captain revokes their
@@ -245,11 +281,85 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
     router.back();
   };
 
+  // Photo pick → upload to Storage → persist photo_url immediately (edit-only;
+  // the bucket path {teamId}/{playerId} needs an existing player). Saving on
+  // pick means the photo sticks even if the coach backs out without "Save".
+  const pickPhoto = async () => {
+    if (!initial) return;
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) {
+      showError(
+        "Photo access needed",
+        "Enable photo access for Unlock in Settings to add a player photo."
+      );
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    });
+    const asset = result.canceled ? null : result.assets[0];
+    if (!asset?.uri) return;
+    setPhotoBusy(true);
+    const up = await uploadPlayerPhoto({
+      teamId,
+      playerId: initial.id,
+      uri: asset.uri,
+      mimeType: asset.mimeType ?? null,
+    });
+    if (!up.ok) {
+      setPhotoBusy(false);
+      showError("Couldn't upload photo", up.error);
+      return;
+    }
+    const { error: updErr } = await supabase
+      .from("team_players")
+      .update({ photo_url: up.url })
+      .eq("id", initial.id);
+    setPhotoBusy(false);
+    if (updErr) {
+      showError("Couldn't save photo", updErr.message);
+      return;
+    }
+    setPhotoUrl(up.url);
+    lightHaptic();
+  };
+
+  const removePhoto = async () => {
+    if (!initial) return;
+    setPhotoBusy(true);
+    const { error: updErr } = await supabase
+      .from("team_players")
+      .update({ photo_url: null })
+      .eq("id", initial.id);
+    setPhotoBusy(false);
+    if (updErr) {
+      showError("Couldn't remove photo", updErr.message);
+      return;
+    }
+    setPhotoUrl(null);
+  };
+
   const onSubmit = async (mode: "back" | "another") => {
     setError(null);
     const name = joinFirstLast(first, last);
     if (!name) {
       setError("First name is required.");
+      return;
+    }
+
+    // Physicals range guards (mirror the migration-101 CHECK constraints) so a
+    // bad value surfaces a friendly message, not a raw Postgres error.
+    const hIn = parsedHeightIn();
+    if (hIn != null && (hIn < 36 || hIn > 96)) {
+      setError("Height looks off — feet 3–8 and inches 0–11.");
+      return;
+    }
+    const wLb = weight.trim() ? parseInt(weight, 10) : null;
+    if (wLb != null && (wLb < 50 || wLb > 500)) {
+      setError("Weight should be between 50 and 500 lb.");
       return;
     }
 
@@ -440,6 +550,20 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
             eyebrow={{ label: "Live preview", color: colors.lime[400] }}
           />
         </View>
+
+        {/* Player photo — edit only (Storage path needs the player id). */}
+        {isEditing ? (
+          <View style={{ paddingHorizontal: 16, marginTop: 12 }}>
+            <PhotoRow
+              photoUrl={photoUrl}
+              initials={initials}
+              accent={accent}
+              busy={photoBusy}
+              onPick={pickPhoto}
+              onRemove={removePhoto}
+            />
+          </View>
+        ) : null}
 
         {/* 01 Identity */}
         <Section idx="01" title="Identity">
@@ -655,6 +779,55 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
               },
             ]}
           />
+        </Section>
+
+        {/* 05 Physicals */}
+        <Section idx="05" title="Physicals" sub="Shown on the player card." optional>
+          <View style={{ flexDirection: "row", gap: 16 }}>
+            <View>
+              <FieldLabel>Height</FieldLabel>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <FormInput
+                  value={heightFt}
+                  onChangeText={(v) => setHeightFt(v.replace(/\D/g, "").slice(0, 1))}
+                  placeholder="6"
+                  keyboardType="number-pad"
+                  mono
+                  style={{ width: 60, textAlign: "center", fontSize: 17 }}
+                />
+                <Text style={[fontStyle("regular"), { fontSize: 13, color: colors.text.muted }]}>
+                  ft
+                </Text>
+                <FormInput
+                  value={heightInch}
+                  onChangeText={(v) => setHeightInch(v.replace(/\D/g, "").slice(0, 2))}
+                  placeholder="1"
+                  keyboardType="number-pad"
+                  mono
+                  style={{ width: 60, textAlign: "center", fontSize: 17 }}
+                />
+                <Text style={[fontStyle("regular"), { fontSize: 13, color: colors.text.muted }]}>
+                  in
+                </Text>
+              </View>
+            </View>
+            <View>
+              <FieldLabel>Weight</FieldLabel>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <FormInput
+                  value={weight}
+                  onChangeText={(v) => setWeight(v.replace(/\D/g, "").slice(0, 3))}
+                  placeholder="190"
+                  keyboardType="number-pad"
+                  mono
+                  style={{ width: 76, textAlign: "center", fontSize: 17 }}
+                />
+                <Text style={[fontStyle("regular"), { fontSize: 13, color: colors.text.muted }]}>
+                  lb
+                </Text>
+              </View>
+            </View>
+          </View>
         </Section>
 
         {error ? (
@@ -964,6 +1137,115 @@ function FormInput({
         style,
       ]}
     />
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// PHOTO ROW (edit only)
+// ──────────────────────────────────────────────────────────────────────
+
+function PhotoRow({
+  photoUrl,
+  initials,
+  accent,
+  busy,
+  onPick,
+  onRemove,
+}: {
+  photoUrl: string | null;
+  initials: string;
+  accent: string;
+  busy: boolean;
+  onPick: () => void;
+  onRemove: () => void;
+}) {
+  return (
+    <View
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 14,
+        padding: 14,
+        borderRadius: radius.lg,
+        borderWidth: 1,
+        borderColor: colors.border.card,
+        backgroundColor: colors.surface.raised,
+      }}
+    >
+      {photoUrl ? (
+        <Image
+          source={{ uri: photoUrl }}
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: 14,
+            borderWidth: 1,
+            borderColor: colors.border.card,
+          }}
+        />
+      ) : (
+        <View
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: 14,
+            backgroundColor: accent,
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <MonoText weight="bold" style={{ fontSize: 18, color: colors.text.onBrand }}>
+            {initials}
+          </MonoText>
+        </View>
+      )}
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text
+          style={[
+            fontStyle("bold"),
+            { fontSize: 14, fontWeight: fontWeight.bold, color: colors.text.primary },
+          ]}
+        >
+          Player photo
+        </Text>
+        <Text
+          style={[
+            fontStyle("regular"),
+            { fontSize: 12, color: colors.text.muted, marginTop: 2 },
+          ]}
+        >
+          {photoUrl ? "Tap change to replace it." : "Add a photo for the player card."}
+        </Text>
+      </View>
+      <View style={{ alignItems: "flex-end", gap: 6 }}>
+        <TouchableOpacity
+          onPress={onPick}
+          disabled={busy}
+          activeOpacity={0.8}
+          accessibilityLabel={photoUrl ? "Change photo" : "Add photo"}
+          style={{
+            paddingHorizontal: 12,
+            paddingVertical: 8,
+            borderRadius: radius.pill,
+            backgroundColor: colors.orange.tint,
+            borderWidth: 1,
+            borderColor: colors.orange.tintBorder,
+            opacity: busy ? 0.6 : 1,
+          }}
+        >
+          <Text style={[fontStyle("medium"), { fontSize: 12.5, color: colors.orange[400] }]}>
+            {busy ? "Uploading…" : photoUrl ? "Change" : "Add photo"}
+          </Text>
+        </TouchableOpacity>
+        {photoUrl && !busy ? (
+          <TouchableOpacity onPress={onRemove} activeOpacity={0.7} hitSlop={8}>
+            <Text style={[fontStyle("regular"), { fontSize: 11.5, color: colors.text.muted }]}>
+              Remove
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </View>
   );
 }
 

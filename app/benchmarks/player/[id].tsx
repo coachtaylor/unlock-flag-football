@@ -28,7 +28,7 @@ import {
 import { addBenchmarkSet, correctBenchmarkResult } from "../../../lib/benchmarks";
 import type { BenchmarkType } from "../../../constants/benchmarks";
 import { addPlayerNote } from "../../../lib/player-notes";
-import { GradeBadge } from "../../../components/scouting/GradeBadge";
+import { GroupGradesRow } from "../../../components/scouting/GroupGradesRow";
 import { AthleteHero } from "../../../components/ui/AthleteHero";
 import { PlayerSkillProfileCard } from "../../../components/PlayerSkillProfileCard";
 import { Section, SectionLabel } from "../../../components/ui/FormSection";
@@ -487,26 +487,8 @@ export default function PlayerScoutDetailScreen() {
         {card.groupScores.length ? (
           <Section>
             <SectionLabel>Skill areas</SectionLabel>
-            <View style={{ flexDirection: "row", flexWrap: "wrap", gap: spacing.sm, marginTop: 6 }}>
-              {card.groupScores.map((g) => (
-                <View
-                  key={g.group}
-                  style={{
-                    flexDirection: "row",
-                    alignItems: "center",
-                    gap: 8,
-                    paddingHorizontal: spacing.md,
-                    paddingVertical: 8,
-                    borderRadius: radius.md,
-                    backgroundColor: colors.surface.overlay,
-                  }}
-                >
-                  <GradeBadge grade={g.grade} size="sm" />
-                  <Text style={[fontStyle("medium"), { fontSize: 12.5, color: colors.text.secondary }]}>
-                    {g.label}
-                  </Text>
-                </View>
-              ))}
+            <View style={{ marginTop: 6 }}>
+              <GroupGradesRow groups={card.groupScores} />
             </View>
           </Section>
         ) : null}

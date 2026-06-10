@@ -20,20 +20,24 @@ function EditPlayerScreen() {
     let cancelled = false;
     (async () => {
       if (!id) return;
-      // Try with color_index (migration 45); fall back without it.
-      const sel = (withColor: boolean) =>
+      // Degrade through migration drift: 101 card cols (photo/physicals) →
+      // 45 color_index.
+      const sel = (withColor: boolean, withCard: boolean) =>
         supabase
           .from("team_players")
           .select(
             `id, player_name, first_name, last_name, positions, jersey_number, notes, is_captain, captain_access, user_id${
               withColor ? ", color_index" : ""
-            }`
+            }${withCard ? ", photo_url, height_in, weight_lb" : ""}`
           )
           .eq("id", id)
           .maybeSingle();
-      let res = await sel(true);
+      let res = await sel(true, true);
+      if (res.error && /photo_url|height_in|weight_lb/i.test(res.error.message)) {
+        res = await sel(true, false);
+      }
       if (res.error && /color_index/i.test(res.error.message)) {
-        res = await sel(false);
+        res = await sel(false, false);
       }
       const data = res.data as Record<string, unknown> | null;
 
@@ -52,6 +56,9 @@ function EditPlayerScreen() {
           captainAccess:
             (data.captain_access as "full" | "view" | "none" | null) ?? null,
           accountLinked: !!(data.user_id as string | null),
+          photoUrl: (data.photo_url as string | null) ?? null,
+          heightIn: (data.height_in as number | null) ?? null,
+          weightLb: (data.weight_lb as number | null) ?? null,
         });
       }
       setLoading(false);

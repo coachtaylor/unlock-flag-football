@@ -32,7 +32,13 @@
     },
     "plugins": [
       "expo-router",
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Unlock uses your photos so you can set a player's profile photo."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

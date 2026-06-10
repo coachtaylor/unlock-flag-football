@@ -11,10 +11,13 @@ export function GradeBadge({
   size = "md",
 }: {
   grade: Grade | null;
-  size?: "sm" | "md";
+  // "lg" = the player-card hero's overall badge (Build 18) — bigger and solid-
+  // filled so the headline grade reads as the first thing on the card.
+  size?: "sm" | "md" | "lg";
 }) {
-  const box = size === "sm" ? 24 : 32;
-  const font = size === "sm" ? 12 : 15;
+  const box = size === "sm" ? 24 : size === "lg" ? 54 : 32;
+  const font = size === "sm" ? 12 : size === "lg" ? 27 : 15;
+  const rad = size === "lg" ? radius.md : radius.sm;
 
   if (grade == null) {
     return (
@@ -22,7 +25,7 @@ export function GradeBadge({
         style={{
           width: box,
           height: box,
-          borderRadius: radius.sm,
+          borderRadius: rad,
           alignItems: "center",
           justifyContent: "center",
           backgroundColor: colors.surface.muted,
@@ -38,20 +41,25 @@ export function GradeBadge({
   }
 
   const hex = gradeColor(grade); // 6-digit hex from the heat scale
+  const solid = size === "lg";
   return (
     <View
       style={{
         width: box,
         height: box,
-        borderRadius: radius.sm,
+        borderRadius: rad,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: `${hex}26`, // ~15% tint
-        borderWidth: 1,
+        backgroundColor: solid ? hex : `${hex}26`, // solid for hero, ~15% tint otherwise
+        borderWidth: solid ? 0 : 1,
         borderColor: `${hex}66`,
       }}
     >
-      <Text style={[monoStyle("bold"), { fontSize: font, color: hex }]}>{grade}</Text>
+      <Text
+        style={[monoStyle("bold"), { fontSize: font, color: solid ? colors.text.onBrand : hex }]}
+      >
+        {grade}
+      </Text>
     </View>
   );
 }

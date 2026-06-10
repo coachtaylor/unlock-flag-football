@@ -1,3 +1,13 @@
+// Player Card (Build 18) — the roster detail, redesigned. Top: a grade hero
+// (photo/physicals identity + overall grade + per-group chips + relative
+// standing + mini-stats) so a captain reads "who + how good" at a glance. Below:
+// skill profile, notes, observations, and a bridge into the full scouting
+// detail (per-drill history / sessions / corrections live there, not duplicated
+// here). Grade math comes from the SHARED graders (player-grade.ts) run on a
+// per-player + cohort fetch — the same source the scouting report uses, so the
+// card can't drift from it. Management actions (edit / injury / status) are
+// canManage-gated. Conventions: ActionModal (never Alert.alert); TouchableOpacity
+// static-style; bottom clearance.
 import { useCallback, useEffect, useState } from "react";
 import {
   Modal,
@@ -11,12 +21,17 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { AthleteHero } from "../../../../components/ui/AthleteHero";
 import { Button } from "../../../../components/ui/Button";
 import {
   ActionModal,
   useActionModal,
 } from "../../../../components/ui/ActionModal";
+import { Section, SectionLabel } from "../../../../components/ui/FormSection";
+import { PlayerCardHero } from "../../../../components/roster/PlayerCardHero";
+import {
+  PlayerSkillProfileCard,
+  type PlayerSkill,
+} from "../../../../components/PlayerSkillProfileCard";
 import {
   colors,
   fontWeight,
@@ -24,28 +39,24 @@ import {
   spacing,
   tracking,
 } from "../../../../constants/design";
-import {
-  POSITION_SIDE,
-  POSITIONS,
-  type Side,
-  positionColor,
-  positionTint,
-  sideAccent,
-} from "../../../../constants/positions";
-import { fontStyle, MonoText } from "../../../../constants/typography";
-import { Byline } from "../../../../components/ui/Byline";
+import { fontStyle, monoStyle } from "../../../../constants/typography";
 import { resolveActorName } from "../../../../lib/activity";
-import {
-  playerColorForIndex,
-  initialsFromName,
-  splitFirstLast,
-} from "../../../../lib/athlete";
+import { playerColorForIndex, initialsFromName } from "../../../../lib/athlete";
 import { supabase } from "../../../../lib/supabase";
 import { useTeam } from "../../../../lib/team-context";
 import {
-  PlayerSkillProfileCard,
-  type PlayerSkill,
-} from "../../../../components/PlayerSkillProfileCard";
+  gradePlayerGroups,
+  groupCompositesFromProfile,
+  relativeStandingFor,
+  type GroupScore,
+  type RelativeStanding,
+} from "../../../../lib/scouting/player-grade";
+import {
+  buildPlayerHistory,
+  type BenchHistoryRow,
+} from "../../../../lib/benchmarks/player-history";
+import type { Grade } from "../../../../lib/dashboard/heat-scale";
+import type { SkillGroup } from "../../../../constants/skill-groups";
 
 type Player = {
   id: string;
@@ -57,26 +68,10 @@ type Player = {
   injured: boolean;
   injuryNote: string | null;
   isCaptain: boolean;
-  // Per-player avatar color slot (migration 45). Null only when the DB
-  // hasn't been migrated yet — helper falls back to muted in that case.
   colorIndex: number | null;
-};
-
-type BenchmarkRow = {
-  id: string;
-  assessmentDate: string;
-  timeSeconds: number | null;
-  rating: number | null;
-  tags: string[];
-  notes: string | null;
-  drillName: string;
-  benchmarkType: "timed" | "rated" | null;
-};
-
-type GroupedDrill = {
-  drillName: string;
-  benchmarkType: "timed" | "rated" | null;
-  results: BenchmarkRow[];
+  photoUrl: string | null;
+  heightIn: number | null;
+  weightLb: number | null;
 };
 
 type ObservationRow = {
@@ -86,17 +81,31 @@ type ObservationRow = {
   practiceTitle: string | null;
 };
 
-function formatDate(iso: string) {
-  const [y, m, d] = iso.split("-").map(Number);
-  const date = new Date(y, (m ?? 1) - 1, d ?? 1);
-  return date.toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
+// Grade evidence derived from the shared graders (matches the scouting report).
+type GradeEvidence = {
+  groupScores: GroupScore[];
+  overallGrade: Grade | null;
+  standing: RelativeStanding | null;
+  benchmarkCount: number;
+  pbCount: number;
+  drillCount: number;
+};
+
+const EMPTY_GRADE: GradeEvidence = {
+  groupScores: [],
+  overallGrade: null,
+  standing: null,
+  benchmarkCount: 0,
+  pbCount: 0,
+  drillCount: 0,
+};
+
+function shortMonth(iso: string) {
+  const d = new Date(iso);
+  return d.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
 }
 
-// player_notes.created_at is a full timestamp, not a plain date.
+// player_notes.created_at is a full timestamp.
 function formatStamp(iso: string) {
   return new Date(iso).toLocaleDateString("en-US", {
     month: "short",
@@ -113,86 +122,87 @@ export default function PlayerDetailScreen() {
   const { teamId, canManage } = useTeam();
   const [loading, setLoading] = useState(true);
   const [player, setPlayer] = useState<Player | null>(null);
-  const [grouped, setGrouped] = useState<GroupedDrill[]>([]);
   const [observations, setObservations] = useState<ObservationRow[]>([]);
   const [skillProfile, setSkillProfile] = useState<PlayerSkill[]>([]);
+  const [grade, setGrade] = useState<GradeEvidence>(EMPTY_GRADE);
   const [busy, setBusy] = useState(false);
   const [addedByName, setAddedByName] = useState<string | null>(null);
   const [addedAt, setAddedAt] = useState<string | null>(null);
-  // App-styled confirm/error modal (replaces native Alert.alert).
   const { show: showModal, showError, modalProps } = useActionModal();
 
   const load = useCallback(async () => {
     if (!id) return;
 
-    // Try the richest projection first; degrade if migration 43
-    // (injury) or 45 (color_index) isn't applied.
-    const playerSelect = (
-      withInjury: boolean,
-      withColorIndex: boolean,
-      withCreatedBy: boolean
-    ) =>
+    // Resilient player select — degrade through migration drift (101 card cols →
+    // 75 attribution → 45 color_index → 43 injury).
+    const sel = (cols: string) =>
       supabase
         .from("team_players")
         .select(
-          `id, player_name, positions, jersey_number, status, notes, is_captain${
-            withCreatedBy ? ", created_by, created_at" : ""
-          }${withInjury ? ", is_injured, injury_note" : ""}${
-            withColorIndex ? ", color_index" : ""
-          }`
+          `id, player_name, positions, jersey_number, status, notes, is_captain${cols}`
         )
         .eq("id", id)
         .maybeSingle();
-    const [playerResRaw, benchRes, notesRes, skillRes] = await Promise.all([
-      (async () => {
-        let res = await playerSelect(true, true, true);
-        // Build 14.5 attribution columns — drop if migration 75 isn't applied.
-        if (res.error && /created_by|created_at/i.test(res.error.message)) {
-          res = await playerSelect(true, true, false);
-        }
-        if (res.error && /color_index/i.test(res.error.message)) {
-          res = await playerSelect(true, false, false);
-        }
-        if (res.error && /is_injured|injury_note/i.test(res.error.message)) {
-          res = await playerSelect(false, false, false);
-        }
-        return res;
-      })(),
-      supabase
-        .from("benchmark_results")
-        .select(
-          "id, assessment_date, time_seconds, rating, tags, notes, team_drills(drill_name, benchmark_type)"
-        )
-        .eq("player_id", id)
-        .order("assessment_date", { ascending: false }),
-      // player_notes ships in migration 37 — tolerate it not being applied.
-      supabase
-        .from("player_notes")
-        .select("id, note_text, created_at, practice_plans(title)")
-        .eq("player_id", id)
-        .order("created_at", { ascending: false }),
-      // Skill profile (Build 14e). v_player_skill_profile already scopes to
-      // skills the player has signal on (no position-bias filtering needed).
-      // Tolerate the view not existing yet (pre-taxonomy DBs) — fall back to
-      // an empty profile so the card shows its locked state instead of erroring.
-      teamId
-        ? supabase
-            .from("v_player_skill_profile")
-            .select(
-              "skill_id, skill_name, skill_group, composite_score, drill_sample_size"
-            )
-            .eq("player_id", id)
-            .eq("team_id", teamId)
-        : Promise.resolve({ data: [], error: null }),
-    ]);
 
-    const playerRes = playerResRaw;
+    const [playerRes, benchRes, notesRes, skillRes, cohortPlayersRes, cohortProfilesRes] =
+      await Promise.all([
+        (async () => {
+          let res = await sel(
+            ", created_by, created_at, is_injured, injury_note, color_index, photo_url, height_in, weight_lb"
+          );
+          if (res.error && /photo_url|height_in|weight_lb/i.test(res.error.message))
+            res = await sel(", created_by, created_at, is_injured, injury_note, color_index");
+          if (res.error && /created_by|created_at/i.test(res.error.message))
+            res = await sel(", is_injured, injury_note, color_index");
+          if (res.error && /color_index/i.test(res.error.message))
+            res = await sel(", is_injured, injury_note");
+          if (res.error && /is_injured|injury_note/i.test(res.error.message))
+            res = await sel("");
+          return res;
+        })(),
+        supabase
+          .from("benchmark_results")
+          .select(
+            "id, assessment_date, time_seconds, rating, made_count, attempts_count, benchmark_type, drill_id, team_drills(id, drill_name, benchmark_type, benchmark_types)"
+          )
+          .eq("player_id", id)
+          .order("assessment_date", { ascending: true }),
+        supabase
+          .from("player_notes")
+          .select("id, note_text, created_at, practice_plans(title)")
+          .eq("player_id", id)
+          .order("created_at", { ascending: false }),
+        // This player's skill profile (grade + skill-profile card).
+        teamId
+          ? supabase
+              .from("v_player_skill_profile")
+              .select(
+                "skill_id, skill_name, skill_group, composite_score, drill_sample_size"
+              )
+              .eq("player_id", id)
+              .eq("team_id", teamId)
+          : Promise.resolve({ data: [], error: null }),
+        // Cohort: every team player's positions (for room membership) …
+        teamId
+          ? supabase.from("team_players").select("id, positions").eq("team_id", teamId)
+          : Promise.resolve({ data: [], error: null }),
+        // … and the team's profile rows (for each cohort member's overall score).
+        teamId
+          ? supabase
+              .from("v_player_skill_profile")
+              .select("player_id, skill_group, composite_score")
+              .eq("team_id", teamId)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+    let positions: string[] = [];
     if (playerRes.data) {
       const raw = playerRes.data as unknown as Record<string, unknown>;
+      positions = (raw.positions as string[] | null) ?? [];
       setPlayer({
         id: raw.id as string,
         name: raw.player_name as string,
-        positions: (raw.positions as string[] | null) ?? [],
+        positions,
         jerseyNumber: (raw.jersey_number as string | null) ?? null,
         status: raw.status as "active" | "inactive",
         notes: (raw.notes as string | null) ?? null,
@@ -200,48 +210,96 @@ export default function PlayerDetailScreen() {
         injuryNote: (raw.injury_note as string | null) ?? null,
         colorIndex: (raw.color_index as number | null) ?? null,
         isCaptain: raw.is_captain === true,
+        photoUrl: (raw.photo_url as string | null) ?? null,
+        heightIn: (raw.height_in as number | null) ?? null,
+        weightLb: (raw.weight_lb as number | null) ?? null,
       });
-      // Attribution byline: who added this player (Build 14.5).
       setAddedAt((raw.created_at as string | null) ?? null);
       resolveActorName((raw.created_by as string | null) ?? null).then(setAddedByName);
     } else {
       setPlayer(null);
     }
 
-    const rows: BenchmarkRow[] = (benchRes.data ?? []).map((b) => {
-      const drill = Array.isArray(b.team_drills)
-        ? b.team_drills[0]
-        : b.team_drills;
-      return {
-        id: b.id as string,
-        assessmentDate: b.assessment_date as string,
-        timeSeconds: (b.time_seconds as number | null) ?? null,
-        rating: (b.rating as number | null) ?? null,
-        tags: ((b.tags as string[] | null) ?? []) as string[],
-        notes: (b.notes as string | null) ?? null,
-        drillName: (drill?.drill_name as string) ?? "Unknown drill",
-        benchmarkType:
-          (drill?.benchmark_type as "timed" | "rated" | null) ?? null,
-      };
-    });
+    // ── Grade evidence via the shared graders ────────────────────────────────
+    type ProfileRow = {
+      skill_id: string;
+      skill_name: string;
+      skill_group: SkillGroup;
+      composite_score: number | null;
+      drill_sample_size: number | null;
+    };
+    const profileRows = (skillRes.data as ProfileRow[] | null) ?? [];
 
-    const groups: GroupedDrill[] = [];
-    const idx = new Map<string, number>();
-    for (const r of rows) {
-      const key = `${r.drillName}::${r.benchmarkType ?? ""}`;
-      let i = idx.get(key);
-      if (i === undefined) {
-        i = groups.length;
-        idx.set(key, i);
-        groups.push({
-          drillName: r.drillName,
-          benchmarkType: r.benchmarkType,
-          results: [],
-        });
-      }
-      groups[i].results.push(r);
+    setSkillProfile(
+      profileRows
+        .filter((r) => r.composite_score != null)
+        .map((r) => ({
+          skillId: r.skill_id,
+          skillName: r.skill_name,
+          skillGroup: r.skill_group,
+          composite: Number(r.composite_score),
+          sampleSize: r.drill_sample_size ?? 0,
+        }))
+    );
+
+    const { groupScores, overallGrade } = gradePlayerGroups(
+      groupCompositesFromProfile(
+        profileRows.map((r) => ({
+          skill_group: r.skill_group,
+          composite_score: r.composite_score,
+        }))
+      ),
+      positions
+    );
+
+    const historyRows: BenchHistoryRow[] = ((benchRes.data ?? []) as Record<string, unknown>[]).map(
+      (b) => ({
+        id: b.id as string,
+        assessment_date: b.assessment_date as string,
+        time_seconds: (b.time_seconds as number | null) ?? null,
+        rating: (b.rating as number | null) ?? null,
+        made_count: (b.made_count as number | null) ?? null,
+        attempts_count: (b.attempts_count as number | null) ?? null,
+        benchmark_type: (b.benchmark_type as string | null) ?? null,
+        drill_id: b.drill_id as string,
+        team_drills: b.team_drills as BenchHistoryRow["team_drills"],
+      })
+    );
+    const history = buildPlayerHistory(historyRows);
+
+    // Cohort overall scores → relative standing (same grader, one source).
+    const cohortProfileByPlayer = new Map<
+      string,
+      { skill_group: SkillGroup; composite_score: number | null }[]
+    >();
+    for (const r of (cohortProfilesRes.data as {
+      player_id: string;
+      skill_group: SkillGroup;
+      composite_score: number | null;
+    }[] | null) ?? []) {
+      const arr = cohortProfileByPlayer.get(r.player_id) ?? [];
+      arr.push({ skill_group: r.skill_group, composite_score: r.composite_score });
+      cohortProfileByPlayer.set(r.player_id, arr);
     }
-    setGrouped(groups);
+    const cohort = ((cohortPlayersRes.data as { id: string; positions: string[] | null }[] | null) ??
+      []).map((pl) => ({
+      playerId: pl.id,
+      positions: pl.positions ?? [],
+      overallScore: gradePlayerGroups(
+        groupCompositesFromProfile(cohortProfileByPlayer.get(pl.id) ?? []),
+        pl.positions ?? []
+      ).overallScore,
+    }));
+    const standing = relativeStandingFor({ playerId: id, positions }, cohort);
+
+    setGrade({
+      groupScores,
+      overallGrade,
+      standing,
+      benchmarkCount: history.benchmarkCount,
+      pbCount: history.pbCount,
+      drillCount: history.drills.length,
+    });
 
     const obs: ObservationRow[] = (
       (notesRes.data as Record<string, unknown>[] | null) ?? []
@@ -258,26 +316,6 @@ export default function PlayerDetailScreen() {
       };
     });
     setObservations(obs);
-
-    type SkillProfileRow = {
-      skill_id: string;
-      skill_name: string;
-      skill_group: PlayerSkill["skillGroup"];
-      composite_score: number | null;
-      drill_sample_size: number | null;
-    };
-    const profile: PlayerSkill[] = (
-      (skillRes.data as SkillProfileRow[] | null) ?? []
-    )
-      .filter((r) => r.composite_score != null)
-      .map((r) => ({
-        skillId: r.skill_id,
-        skillName: r.skill_name,
-        skillGroup: r.skill_group,
-        composite: Number(r.composite_score),
-        sampleSize: r.drill_sample_size ?? 0,
-      }));
-    setSkillProfile(profile);
   }, [id, teamId]);
 
   useEffect(() => {
@@ -297,10 +335,7 @@ export default function PlayerDetailScreen() {
     }, [load])
   );
 
-  // Mark-injured confirm modal — replaces the native iOS Alert so it
-  // matches the rest of the app's dark + orange design language. Also
-  // hosts an optional injury note input so coaches can capture context
-  // ("ankle, ~2 weeks") inline instead of needing a separate edit step.
+  // ── Injury confirm modal (mirrors prior behavior) ──────────────────────────
   const [injuryModalOpen, setInjuryModalOpen] = useState(false);
   const [injuryNoteDraft, setInjuryNoteDraft] = useState("");
 
@@ -317,11 +352,7 @@ export default function PlayerDetailScreen() {
       .from("team_players")
       .update({
         is_injured: nextInjured,
-        // Clearing the flag also clears the injury note so the next
-        // injury starts fresh.
-        injury_note: nextInjured
-          ? injuryNoteDraft.trim() || null
-          : null,
+        injury_note: nextInjured ? injuryNoteDraft.trim() || null : null,
       })
       .eq("id", player.id);
     setBusy(false);
@@ -373,12 +404,7 @@ export default function PlayerDetailScreen() {
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.surface.base }}>
-        <View
-          style={{
-            paddingTop: insets.top + 16,
-            paddingHorizontal: 18,
-          }}
-        >
+        <View style={{ paddingTop: insets.top + 16, paddingHorizontal: 18 }}>
           <BackButton onPress={() => router.back()} />
         </View>
       </View>
@@ -408,11 +434,7 @@ export default function PlayerDetailScreen() {
           <Text
             style={[
               fontStyle("regular"),
-              {
-                fontSize: 14,
-                color: colors.text.secondary,
-                textAlign: "center",
-              },
+              { fontSize: 14, color: colors.text.secondary, textAlign: "center" },
             ]}
           >
             Player not found.
@@ -422,26 +444,8 @@ export default function PlayerDetailScreen() {
     );
   }
 
-  const { first, last } = splitFirstLast(player.name);
-  const initials = initialsFromName(player.name);
-  const primary = player.positions[0] ?? null;
-  const secondary = player.positions.slice(1, 3);
-  const side: Side | null = primary ? POSITION_SIDE[primary] ?? null : null;
-  // Per-player identity color, slot assigned by migration 45. Same hue
-  // the SUN ROLL avatars, streak rows, roster list, and benchmark queue
-  // use for this player.
   const accent = playerColorForIndex(player.colorIndex);
-
-  const statusEyebrow = player.injured
-    ? {
-        label: player.isCaptain ? "Injured · Captain" : "Injured",
-        color: colors.red.semantic,
-      }
-    : player.isCaptain
-    ? { label: "Captain", color: colors.orange[500] }
-    : player.status === "active"
-    ? { label: "Active", color: colors.green[400] }
-    : { label: "Inactive", color: colors.text.muted };
+  const joinedLabel = addedAt ? `Joined ${shortMonth(addedAt)}` : null;
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.surface.base }}>
@@ -453,167 +457,116 @@ export default function PlayerDetailScreen() {
           paddingBottom: 12,
           flexDirection: "row",
           alignItems: "center",
-          justifyContent: "space-between",
+          gap: spacing.sm,
         }}
       >
         <BackButton onPress={() => router.back()} />
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-          <MonoText
-            weight="bold"
-            style={{
-              fontSize: 11,
-              fontWeight: fontWeight.bold,
-              color: colors.orange[500],
-              letterSpacing: tracking.loose,
-            }}
-          >
-            .03
-          </MonoText>
-          <Text
-            style={[
-              fontStyle("bold"),
-              {
-                fontSize: 11,
-                fontWeight: fontWeight.bold,
-                color: colors.text.secondary,
-                letterSpacing: tracking.loose,
-                textTransform: "uppercase",
-              },
-            ]}
-          >
-            ROSTER · VIEW
-          </Text>
-        </View>
-        <View style={{ width: 36 }} />
+        <Text
+          style={[
+            monoStyle("bold"),
+            { fontSize: 11, color: colors.orange[500], letterSpacing: tracking.loose },
+          ]}
+        >
+          ROSTER · PLAYER
+        </Text>
       </View>
 
       <ScrollView
         contentContainerStyle={{
+          paddingHorizontal: 16,
           paddingBottom: insets.bottom + 100,
+          gap: 14,
         }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Hero */}
-        <View style={{ paddingHorizontal: 16 }}>
-          <AthleteHero
-            initials={initials}
-            fullName={player.name}
-            jersey={player.jerseyNumber ?? ""}
-            accent={accent}
-            side={side}
-            primary={primary}
-            secondary={secondary}
-            eyebrow={statusEyebrow}
-          />
-        </View>
+        <PlayerCardHero
+          name={player.name}
+          initials={initialsFromName(player.name)}
+          jerseyNumber={player.jerseyNumber}
+          positions={player.positions}
+          status={player.status}
+          isCaptain={player.isCaptain}
+          injured={player.injured}
+          injuryNote={player.injuryNote}
+          accent={accent}
+          photoUrl={player.photoUrl}
+          heightIn={player.heightIn}
+          weightLb={player.weightLb}
+          addedByName={addedByName}
+          addedAt={addedAt}
+          joinedLabel={joinedLabel}
+          overallGrade={grade.overallGrade}
+          groupScores={grade.groupScores}
+          standing={grade.standing}
+          benchmarkCount={grade.benchmarkCount}
+          pbCount={grade.pbCount}
+          drillCount={grade.drillCount}
+        />
 
-        {/* 01 Identity (read-only) */}
-        <Section idx="01" title="Identity">
-          <View style={{ flexDirection: "row", gap: 10 }}>
-            <ReadField
-              label="First name"
-              value={first || "—"}
-              style={{ flex: 1 }}
-            />
-            <ReadField
-              label="Last name"
-              value={last || "—"}
-              style={{ flex: 1 }}
-            />
-          </View>
-          <View style={{ marginTop: 14 }}>
-            <ReadField
-              label="Jersey #"
-              value={player.jerseyNumber ? `#${player.jerseyNumber}` : "—"}
-              mono
-              style={{ width: 120 }}
-            />
-          </View>
-          {addedByName ? (
-            <View style={{ marginTop: 14 }}>
-              <Byline who={addedByName} verb="Added" at={addedAt} />
-            </View>
-          ) : null}
-        </Section>
-
-        {/* 02 Position (read-only) */}
-        <Section
-          idx="02"
-          title="Position"
-          sub={primary ? "Primary first — drives drill targeting." : undefined}
+        {/* Bridge into the full scouting detail (deep evidence lives there). */}
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={() => router.push(`/benchmarks/player/${player.id}` as never)}
+          accessibilityLabel="View full scouting"
+          style={{
+            flexDirection: "row",
+            alignItems: "center",
+            gap: spacing.md,
+            paddingVertical: 14,
+            paddingHorizontal: 16,
+            borderRadius: radius.lg,
+            backgroundColor: colors.surface.raised,
+            borderWidth: 1,
+            borderColor: colors.border.card,
+          }}
         >
-          {player.positions.length === 0 ? (
-            <Text
-              style={[
-                fontStyle("regular"),
-                { fontSize: 13, color: colors.text.muted },
-              ]}
-            >
-              No positions assigned.
+          <View
+            style={{
+              width: 34,
+              height: 34,
+              borderRadius: radius.md,
+              backgroundColor: colors.orange.tint,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Ionicons name="analytics-outline" size={17} color={colors.orange[400]} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={[fontStyle("medium"), { fontSize: 14, color: colors.text.primary }]}>
+              View full scouting
             </Text>
-          ) : (
-            <View style={{ gap: 12 }}>
-              <PositionGroupRead
-                sideLabel="OFFENSE"
-                side="offense"
-                positions={POSITIONS.offense.map((p) => p.id)}
-                primary={primary}
-                secondary={secondary}
-              />
-              <PositionGroupRead
-                sideLabel="DEFENSE"
-                side="defense"
-                positions={POSITIONS.defense.map((p) => p.id)}
-                primary={primary}
-                secondary={secondary}
-              />
-            </View>
-          )}
-        </Section>
+            <Text style={[fontStyle("regular"), { fontSize: 12, color: colors.text.muted, marginTop: 1 }]}>
+              Per-drill history, trend, and sessions
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={colors.text.muted} />
+        </TouchableOpacity>
 
-        {/* 03 Notes (read-only) */}
-        <Section idx="03" title="Notes" optional>
-          {player.notes ? (
+        {/* Skill profile — its own card. */}
+        <PlayerSkillProfileCard skills={skillProfile} playerName={player.name} />
+
+        {/* Notes (free-text). */}
+        {player.notes ? (
+          <Section>
+            <SectionLabel>Notes</SectionLabel>
             <Text
               style={[
                 fontStyle("regular"),
-                {
-                  fontSize: 14,
-                  lineHeight: 20,
-                  color: colors.text.primary,
-                  padding: 14,
-                  borderRadius: radius.input,
-                  borderWidth: 1,
-                  borderColor: colors.border.card,
-                  backgroundColor: colors.surface.input,
-                },
+                { fontSize: 14, lineHeight: 20, color: colors.text.primary },
               ]}
             >
               {player.notes}
             </Text>
-          ) : (
-            <Text
-              style={[
-                fontStyle("regular"),
-                { fontSize: 13, color: colors.text.muted },
-              ]}
-            >
-              No notes added.
-            </Text>
-          )}
-        </Section>
+          </Section>
+        ) : null}
 
-        {/* 04 Observations — dated coaching notes */}
-        <Section idx="04" title="Observations" optional>
+        {/* Observations — dated coaching notes (read-only; add lives on scouting). */}
+        <Section>
+          <SectionLabel>Observations</SectionLabel>
           {observations.length === 0 ? (
-            <Text
-              style={[
-                fontStyle("regular"),
-                { fontSize: 13, color: colors.text.muted },
-              ]}
-            >
-              No observations yet. Notes added when logging a practice show up
-              here.
+            <Text style={[fontStyle("regular"), { fontSize: 13, color: colors.text.muted }]}>
+              No observations yet. Notes added when logging a practice show up here.
             </Text>
           ) : (
             <View style={{ gap: 10 }}>
@@ -621,11 +574,9 @@ export default function PlayerDetailScreen() {
                 <View
                   key={o.id}
                   style={{
-                    padding: 14,
-                    borderRadius: radius.xl,
-                    backgroundColor: colors.surface.raised,
-                    borderWidth: 1,
-                    borderColor: colors.border.subtle,
+                    padding: 12,
+                    borderRadius: radius.md,
+                    backgroundColor: colors.surface.overlay,
                   }}
                 >
                   <Text
@@ -645,12 +596,7 @@ export default function PlayerDetailScreen() {
                   <Text
                     style={[
                       fontStyle("regular"),
-                      {
-                        fontSize: 14,
-                        lineHeight: 20,
-                        color: colors.text.primary,
-                        marginTop: 6,
-                      },
+                      { fontSize: 14, lineHeight: 20, color: colors.text.primary, marginTop: 6 },
                     ]}
                   >
                     {o.noteText}
@@ -661,335 +607,125 @@ export default function PlayerDetailScreen() {
           )}
         </Section>
 
-        {/* Skill profile — the per-player payoff: top skills + needs-work,
-            derived from rated benchmarks (Build 14e). */}
-        <Section idx="05" title="Skill Profile">
-          <PlayerSkillProfileCard
-            skills={skillProfile}
-            playerName={player.name}
-          />
-        </Section>
-
-        {/* Benchmark history */}
-        <Section idx="06" title="Benchmark History">
-          {grouped.length === 0 ? (
-            <View
+        {/* Management actions — full-access only. */}
+        {canManage && (
+          <View style={{ paddingTop: 8, gap: 10 }}>
+            <TouchableOpacity
+              onPress={() => router.push(`/roster/${player.id}/edit` as never)}
+              activeOpacity={0.9}
+              accessibilityLabel="Edit player"
               style={{
-                padding: 24,
-                borderRadius: radius.xl,
-                borderWidth: 1,
-                borderStyle: "dashed",
-                borderColor: colors.border.default,
+                height: 52,
+                borderRadius: 14,
+                backgroundColor: colors.orange[500],
                 alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "row",
+                gap: 8,
+                shadowColor: colors.orange[500],
+                shadowOpacity: 0.35,
+                shadowRadius: 12,
+                shadowOffset: { width: 0, height: 4 },
+              }}
+            >
+              <Ionicons name="pencil" size={14} color={colors.text.primary} />
+              <Text
+                style={[
+                  fontStyle("bold"),
+                  { fontSize: 15, fontWeight: fontWeight.bold, color: colors.text.primary, letterSpacing: 0.2 },
+                ]}
+              >
+                Edit Player
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={openInjuryModal}
+              disabled={busy}
+              activeOpacity={0.85}
+              accessibilityLabel={player.injured ? "Clear injury" : "Mark player as injured"}
+              style={{
+                height: 52,
+                borderRadius: 14,
+                backgroundColor: player.injured ? "rgba(255, 77, 77, 0.10)" : "transparent",
+                borderWidth: 1,
+                borderColor: player.injured ? "rgba(255, 77, 77, 0.45)" : colors.border.default,
+                alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "row",
+                gap: 8,
+                opacity: busy ? 0.5 : 1,
               }}
             >
               <Ionicons
-                name="stopwatch-outline"
-                size={24}
-                color={colors.text.muted}
-                style={{ marginBottom: 8 }}
+                name={player.injured ? "medkit" : "medkit-outline"}
+                size={14}
+                color={player.injured ? colors.red.semantic : colors.text.primary}
               />
               <Text
                 style={[
-                  fontStyle("regular"),
+                  fontStyle("bold"),
                   {
-                    fontSize: 13,
-                    lineHeight: 18,
-                    color: colors.text.secondary,
-                    textAlign: "center",
+                    fontSize: 14,
+                    fontWeight: fontWeight.bold,
+                    color: player.injured ? colors.red.semantic : colors.text.primary,
+                    letterSpacing: 0.2,
                   },
                 ]}
               >
-                No assessments yet. Run a benchmark to see this player's results here.
+                {player.injured ? "Clear injury" : "Mark injured"}
               </Text>
-            </View>
-          ) : (
-            <View style={{ gap: 10 }}>
-              {grouped.map((g) => {
-                const latest = g.results[0];
-                const value =
-                  g.benchmarkType === "timed" && latest.timeSeconds != null
-                    ? `${Number(latest.timeSeconds).toFixed(2)}s`
-                    : g.benchmarkType === "rated" && latest.rating != null
-                    ? `${latest.rating}/5`
-                    : latest.timeSeconds != null
-                    ? `${Number(latest.timeSeconds).toFixed(2)}s`
-                    : latest.rating != null
-                    ? `${latest.rating}/5`
-                    : "—";
-                return (
-                  <View
-                    key={`${g.drillName}-${g.benchmarkType ?? ""}`}
-                    style={{
-                      padding: 14,
-                      borderRadius: radius.xl,
-                      backgroundColor: colors.surface.raised,
-                      borderWidth: 1,
-                      borderColor: colors.border.subtle,
-                    }}
-                  >
-                    <View
-                      style={{
-                        flexDirection: "row",
-                        alignItems: "flex-start",
-                        justifyContent: "space-between",
-                        gap: 12,
-                      }}
-                    >
-                      <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text
-                          numberOfLines={1}
-                          style={[
-                            fontStyle("bold"),
-                            {
-                              fontSize: 15,
-                              fontWeight: fontWeight.bold,
-                              color: colors.text.primary,
-                              letterSpacing: -0.2,
-                            },
-                          ]}
-                        >
-                          {g.drillName}
-                        </Text>
-                        <Text
-                          style={[
-                            fontStyle("regular"),
-                            {
-                              fontSize: 12,
-                              color: colors.text.muted,
-                              marginTop: 4,
-                            },
-                          ]}
-                        >
-                          {formatDate(latest.assessmentDate)}
-                          {g.results.length > 1
-                            ? ` · ${g.results.length} results`
-                            : ""}
-                        </Text>
-                      </View>
-                      <MonoText
-                        weight="bold"
-                        style={{
-                          fontSize: 20,
-                          fontWeight: fontWeight.bold,
-                          color: colors.text.primary,
-                          letterSpacing: -0.4,
-                        }}
-                      >
-                        {value}
-                      </MonoText>
-                    </View>
-                    {latest.tags.length > 0 ? (
-                      <View
-                        style={{
-                          flexDirection: "row",
-                          flexWrap: "wrap",
-                          gap: 4,
-                          marginTop: 10,
-                        }}
-                      >
-                        {latest.tags.map((t) => (
-                          <View
-                            key={t}
-                            style={{
-                              paddingHorizontal: 8,
-                              paddingVertical: 2,
-                              borderRadius: radius.pill,
-                              backgroundColor: colors.surface.overlay,
-                            }}
-                          >
-                            <Text
-                              style={[
-                                fontStyle("medium"),
-                                {
-                                  fontSize: 10,
-                                  color: colors.text.secondary,
-                                  letterSpacing: 0.4,
-                                  textTransform: "uppercase",
-                                },
-                              ]}
-                            >
-                              {t}
-                            </Text>
-                          </View>
-                        ))}
-                      </View>
-                    ) : null}
-                    {latest.notes ? (
-                      <Text
-                        numberOfLines={2}
-                        style={[
-                          fontStyle("regular"),
-                          {
-                            fontSize: 12,
-                            lineHeight: 17,
-                            color: colors.text.muted,
-                            marginTop: 8,
-                          },
-                        ]}
-                      >
-                        {latest.notes}
-                      </Text>
-                    ) : null}
-                  </View>
-                );
-              })}
-            </View>
-          )}
-        </Section>
+            </TouchableOpacity>
 
-        {/* Action buttons — full-access only (view-only members can't
-            edit, flag injuries, or change roster status) */}
-        {canManage && (
-        <View
-          style={{
-            paddingHorizontal: 16,
-            paddingTop: 28,
-            gap: 10,
-          }}
-        >
-          <TouchableOpacity
-            onPress={() => router.push(`/roster/${player.id}/edit` as never)}
-            activeOpacity={0.9}
-            accessibilityLabel="Edit player"
-            style={{
-              height: 52,
-              borderRadius: 14,
-              backgroundColor: colors.orange[500],
-              alignItems: "center",
-              justifyContent: "center",
-              flexDirection: "row",
-              gap: 8,
-              shadowColor: colors.orange[500],
-              shadowOpacity: 0.35,
-              shadowRadius: 12,
-              shadowOffset: { width: 0, height: 4 },
-            }}
-          >
-            <Ionicons name="pencil" size={14} color={colors.text.primary} />
-            <Text
-              style={[
-                fontStyle("bold"),
-                {
-                  fontSize: 15,
-                  fontWeight: fontWeight.bold,
-                  color: colors.text.primary,
-                  letterSpacing: 0.2,
-                },
-              ]}
-            >
-              Edit Player
-            </Text>
-          </TouchableOpacity>
-          {/* Mark injured / clear injury — sits between Edit and the
-              destructive Deactivate so the most-used action is closer to
-              the primary CTA. */}
-          <TouchableOpacity
-            onPress={openInjuryModal}
-            disabled={busy}
-            activeOpacity={0.85}
-            accessibilityLabel={
-              player.injured ? "Clear injury" : "Mark player as injured"
-            }
-            style={{
-              height: 52,
-              borderRadius: 14,
-              backgroundColor: player.injured
-                ? "rgba(255, 77, 77, 0.10)"
-                : "transparent",
-              borderWidth: 1,
-              borderColor: player.injured
-                ? "rgba(255, 77, 77, 0.45)"
-                : colors.border.default,
-              alignItems: "center",
-              justifyContent: "center",
-              flexDirection: "row",
-              gap: 8,
-              opacity: busy ? 0.5 : 1,
-            }}
-          >
-            <Ionicons
-              name={player.injured ? "medkit" : "medkit-outline"}
-              size={14}
-              color={player.injured ? colors.red.semantic : colors.text.primary}
-            />
-            <Text
-              style={[
-                fontStyle("bold"),
-                {
-                  fontSize: 14,
-                  fontWeight: fontWeight.bold,
-                  color: player.injured
-                    ? colors.red.semantic
-                    : colors.text.primary,
-                  letterSpacing: 0.2,
-                },
-              ]}
-            >
-              {player.injured ? "Clear injury" : "Mark injured"}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            onPress={toggleStatus}
-            disabled={busy}
-            activeOpacity={0.85}
-            accessibilityLabel={
-              player.status === "active" ? "Deactivate player" : "Reactivate player"
-            }
-            style={{
-              height: 52,
-              borderRadius: 14,
-              backgroundColor: "transparent",
-              borderWidth: 1,
-              borderColor:
-                player.status === "active"
-                  ? "rgba(255,77,77,0.30)"
-                  : colors.border.default,
-              alignItems: "center",
-              justifyContent: "center",
-              flexDirection: "row",
-              gap: 8,
-              opacity: busy ? 0.5 : 1,
-            }}
-          >
-            <Ionicons
-              name={player.status === "active" ? "remove-circle-outline" : "refresh-outline"}
-              size={14}
-              color={
-                player.status === "active"
-                  ? colors.red.semantic
-                  : colors.text.primary
+            <TouchableOpacity
+              onPress={toggleStatus}
+              disabled={busy}
+              activeOpacity={0.85}
+              accessibilityLabel={
+                player.status === "active" ? "Deactivate player" : "Reactivate player"
               }
-            />
-            <Text
-              style={[
-                fontStyle("bold"),
-                {
-                  fontSize: 14,
-                  fontWeight: fontWeight.bold,
-                  color:
-                    player.status === "active"
-                      ? colors.red.semantic
-                      : colors.text.primary,
-                  letterSpacing: 0.2,
-                },
-              ]}
+              style={{
+                height: 52,
+                borderRadius: 14,
+                backgroundColor: "transparent",
+                borderWidth: 1,
+                borderColor:
+                  player.status === "active" ? "rgba(255,77,77,0.30)" : colors.border.default,
+                alignItems: "center",
+                justifyContent: "center",
+                flexDirection: "row",
+                gap: 8,
+                opacity: busy ? 0.5 : 1,
+              }}
             >
-              {busy
-                ? "Updating…"
-                : player.status === "active"
-                ? "Deactivate Player"
-                : "Reactivate Player"}
-            </Text>
-          </TouchableOpacity>
-        </View>
+              <Ionicons
+                name={player.status === "active" ? "remove-circle-outline" : "refresh-outline"}
+                size={14}
+                color={player.status === "active" ? colors.red.semantic : colors.text.primary}
+              />
+              <Text
+                style={[
+                  fontStyle("bold"),
+                  {
+                    fontSize: 14,
+                    fontWeight: fontWeight.bold,
+                    color: player.status === "active" ? colors.red.semantic : colors.text.primary,
+                    letterSpacing: 0.2,
+                  },
+                ]}
+              >
+                {busy
+                  ? "Updating…"
+                  : player.status === "active"
+                  ? "Deactivate Player"
+                  : "Reactivate Player"}
+              </Text>
+            </TouchableOpacity>
+          </View>
         )}
       </ScrollView>
 
-      {/* Mark-injured confirm — replaces the native Alert. Dark surface,
-          orange/red accents, lets the coach attach an optional injury
-          note in the same step (e.g. "ankle, ~2 weeks"). */}
+      {/* Mark-injured confirm — dark surface, optional injury note. */}
       <Modal
         visible={injuryModalOpen}
         transparent
@@ -1018,14 +754,7 @@ export default function PlayerDetailScreen() {
               gap: spacing.md,
             }}
           >
-            {/* Eyebrow + icon */}
-            <View
-              style={{
-                flexDirection: "row",
-                alignItems: "center",
-                gap: spacing.sm,
-              }}
-            >
+            <View style={{ flexDirection: "row", alignItems: "center", gap: spacing.sm }}>
               <View
                 style={{
                   width: 36,
@@ -1036,11 +765,7 @@ export default function PlayerDetailScreen() {
                   justifyContent: "center",
                 }}
               >
-                <Ionicons
-                  name="medkit"
-                  size={18}
-                  color={colors.red.semantic}
-                />
+                <Ionicons name="medkit" size={18} color={colors.red.semantic} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text
@@ -1056,16 +781,7 @@ export default function PlayerDetailScreen() {
                 >
                   {player.injured ? "CLEAR INJURY" : "MARK INJURED"}
                 </Text>
-                <Text
-                  style={[
-                    fontStyle("bold"),
-                    {
-                      fontSize: 16,
-                      color: colors.text.primary,
-                      marginTop: 2,
-                    },
-                  ]}
-                >
+                <Text style={[fontStyle("bold"), { fontSize: 16, color: colors.text.primary, marginTop: 2 }]}>
                   {player.injured
                     ? `Clear ${player.name}'s injury?`
                     : `Mark ${player.name} as injured?`}
@@ -1076,11 +792,7 @@ export default function PlayerDetailScreen() {
             <Text
               style={[
                 fontStyle("regular"),
-                {
-                  fontSize: 13,
-                  lineHeight: 19,
-                  color: colors.text.secondary,
-                },
+                { fontSize: 13, lineHeight: 19, color: colors.text.secondary },
               ]}
             >
               {player.injured
@@ -1088,7 +800,6 @@ export default function PlayerDetailScreen() {
                 : "They'll show an INJURED badge on the roster. They stay on the active team and still appear in benchmarks and practice — this only flags availability."}
             </Text>
 
-            {/* Injury note input — only shown when marking, not clearing. */}
             {!player.injured ? (
               <View style={{ gap: 6 }}>
                 <Text
@@ -1138,13 +849,7 @@ export default function PlayerDetailScreen() {
               </View>
               <View style={{ flex: 1 }}>
                 <Button
-                  label={
-                    busy
-                      ? "Saving…"
-                      : player.injured
-                      ? "Clear"
-                      : "Mark injured"
-                  }
+                  label={busy ? "Saving…" : player.injured ? "Clear" : "Mark injured"}
                   variant="destructive"
                   onPress={() => applyInjuryChange(!player.injured)}
                   disabled={busy}
@@ -1180,233 +885,5 @@ function BackButton({ onPress }: { onPress: () => void }) {
     >
       <Ionicons name="chevron-back" size={18} color={colors.text.primary} />
     </TouchableOpacity>
-  );
-}
-
-function Section({
-  idx,
-  title,
-  sub,
-  optional,
-  children,
-}: {
-  idx: string;
-  title: string;
-  sub?: string;
-  optional?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <View style={{ paddingHorizontal: 18, paddingTop: 24 }}>
-      <View
-        style={{
-          flexDirection: "row",
-          alignItems: "baseline",
-          gap: 10,
-          marginBottom: sub ? 4 : 14,
-        }}
-      >
-        <MonoText
-          weight="bold"
-          style={{
-            fontSize: 11,
-            fontWeight: fontWeight.bold,
-            color: colors.orange[500],
-            letterSpacing: 0.4,
-          }}
-        >
-          {idx}
-        </MonoText>
-        <Text
-          style={[
-            fontStyle("bold"),
-            {
-              fontSize: 16,
-              fontWeight: fontWeight.bold,
-              color: colors.text.primary,
-              letterSpacing: -0.2,
-            },
-          ]}
-        >
-          {title}
-        </Text>
-        {optional ? (
-          <MonoText
-            weight="medium"
-            style={{
-              fontSize: 10,
-              color: colors.text.muted,
-              marginLeft: 4,
-              letterSpacing: tracking.loose,
-            }}
-          >
-            OPTIONAL
-          </MonoText>
-        ) : null}
-      </View>
-      {sub ? (
-        <Text
-          style={[
-            fontStyle("regular"),
-            {
-              fontSize: 12,
-              color: colors.text.secondary,
-              marginBottom: 14,
-              marginLeft: 22,
-            },
-          ]}
-        >
-          {sub}
-        </Text>
-      ) : null}
-      <View>{children}</View>
-    </View>
-  );
-}
-
-function ReadField({
-  label,
-  value,
-  mono,
-  style,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-  style?: object;
-}) {
-  return (
-    <View style={style}>
-      <Text
-        style={[
-          fontStyle("medium"),
-          {
-            fontSize: 11,
-            color: colors.text.label,
-            letterSpacing: 0.5,
-            textTransform: "uppercase",
-            marginBottom: 8,
-            fontWeight: fontWeight.medium,
-          },
-        ]}
-      >
-        {label}
-      </Text>
-      <View
-        style={{
-          minHeight: 46,
-          paddingHorizontal: 14,
-          paddingVertical: 12,
-          borderRadius: radius.input,
-          borderWidth: 1,
-          borderColor: colors.border.subtle,
-          backgroundColor: colors.surface.raised,
-          justifyContent: "center",
-        }}
-      >
-        <Text
-          style={[
-            mono ? { fontFamily: "JetBrainsMono_500Medium" } : fontStyle("regular"),
-            {
-              fontSize: 15,
-              lineHeight: 20,
-              color: colors.text.primary,
-            },
-          ]}
-        >
-          {value}
-        </Text>
-      </View>
-    </View>
-  );
-}
-
-function PositionGroupRead({
-  sideLabel,
-  side,
-  positions,
-  primary,
-  secondary,
-}: {
-  sideLabel: string;
-  side: Side;
-  positions: string[];
-  primary: string | null;
-  secondary: string[];
-}) {
-  // Filter to only show positions selected on this side
-  const sidePrimary =
-    primary && POSITION_SIDE[primary] === side ? primary : null;
-  const sideSecondary = secondary.filter((p) => POSITION_SIDE[p] === side);
-
-  if (!sidePrimary && sideSecondary.length === 0) return null;
-
-  return (
-    <View>
-      <Text
-        style={[
-          fontStyle("bold"),
-          {
-            fontSize: 10,
-            fontWeight: fontWeight.bold,
-            color: side === "offense" ? colors.orange[500] : colors.red.semantic,
-            letterSpacing: tracking.loose,
-            textTransform: "uppercase",
-            marginBottom: 8,
-            opacity: 0.85,
-          },
-        ]}
-      >
-        {sideLabel}
-      </Text>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 6 }}>
-        {positions
-          .filter((p) => p === sidePrimary || sideSecondary.includes(p))
-          .map((id) => {
-            const isPrimary = id === sidePrimary;
-            const accent = positionColor(id);
-            return (
-              <View
-                key={id}
-                style={{
-                  paddingHorizontal: 14,
-                  paddingVertical: 8,
-                  borderRadius: radius.pill,
-                  backgroundColor: isPrimary ? positionTint(id) : "transparent",
-                  borderWidth: 1,
-                  borderColor: accent,
-                  flexDirection: "row",
-                  alignItems: "center",
-                  gap: 6,
-                }}
-              >
-                {isPrimary ? (
-                  <View
-                    style={{
-                      width: 5,
-                      height: 5,
-                      borderRadius: 2.5,
-                      backgroundColor: accent,
-                    }}
-                  />
-                ) : null}
-                <Text
-                  style={[
-                    fontStyle("bold"),
-                    {
-                      fontSize: 13,
-                      fontWeight: fontWeight.bold,
-                      color: accent,
-                      letterSpacing: 0.1,
-                    },
-                  ]}
-                >
-                  {id}
-                </Text>
-              </View>
-            );
-          })}
-      </View>
-    </View>
   );
 }
