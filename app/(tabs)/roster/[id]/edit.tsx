@@ -14,6 +14,10 @@ function EditPlayerScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
 
   const [initial, setInitial] = useState<PlayerFormInitial | null>(null);
+  // The player's own team_id — used as the PlayerForm team so team-scoped
+  // writes (esp. the photo Storage path {teamId}/{playerId}) target the team
+  // the player actually belongs to, not whatever team the context resolved to.
+  const [playerTeamId, setPlayerTeamId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -26,7 +30,7 @@ function EditPlayerScreen() {
         supabase
           .from("team_players")
           .select(
-            `id, player_name, first_name, last_name, positions, jersey_number, notes, is_captain, captain_access, user_id${
+            `id, team_id, player_name, first_name, last_name, positions, jersey_number, notes, is_captain, captain_access, user_id${
               withColor ? ", color_index" : ""
             }${withCard ? ", photo_url, height_in, weight_lb" : ""}`
           )
@@ -43,6 +47,7 @@ function EditPlayerScreen() {
 
       if (cancelled) return;
       if (data) {
+        setPlayerTeamId((data.team_id as string | null) ?? null);
         setInitial({
           id: data.id as string,
           playerName: (data.player_name as string) ?? "",
@@ -84,7 +89,7 @@ function EditPlayerScreen() {
   }
 
   return (
-    <PlayerForm teamId={teamId} initial={initial} topInset={insets.top} />
+    <PlayerForm teamId={playerTeamId ?? teamId} initial={initial} topInset={insets.top} />
   );
 }
 

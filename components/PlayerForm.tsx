@@ -310,7 +310,13 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
     });
     if (!up.ok) {
       setPhotoBusy(false);
-      showError("Couldn't upload photo", up.error);
+      const rls = /row-level security|violates|not authorized/i.test(up.error);
+      showError(
+        "Couldn't upload photo",
+        rls
+          ? "Storage rejected the upload. The player-photos bucket policies likely need applying (run migration 108), or you don't manage this player's team."
+          : up.error
+      );
       return;
     }
     const { error: updErr } = await supabase
