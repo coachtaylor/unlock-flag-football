@@ -20,6 +20,7 @@ import {
   JetBrainsMono_500Medium,
   JetBrainsMono_700Bold,
 } from "@expo-google-fonts/jetbrains-mono";
+import { Anton_400Regular } from "@expo-google-fonts/anton";
 import { AuthProvider, useAuth } from "../lib/auth-context";
 import { TeamProvider, useTeam } from "../lib/team-context";
 import { colors } from "../constants/design";
@@ -160,6 +161,7 @@ export default function RootLayout() {
     Inter_700Bold,
     JetBrainsMono_500Medium,
     JetBrainsMono_700Bold,
+    Anton_400Regular,
   });
 
   useEffect(() => {

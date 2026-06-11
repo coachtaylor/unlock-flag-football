@@ -10,6 +10,7 @@ import {
 import { Link } from "expo-router";
 import { Button } from "../../components/ui/Button";
 import { Input } from "../../components/ui/Input";
+import Wordmark from "../../components/Wordmark";
 import { colors, radius, spacing } from "../../constants/design";
 import { supabase } from "../../lib/supabase";
 
@@ -86,18 +87,9 @@ export default function SignupScreen() {
         }}
         keyboardShouldPersistTaps="handled"
       >
-        <Text
-          style={{
-            fontSize: 20,
-            lineHeight: 28,
-            fontWeight: "500",
-            color: colors.text.primary,
-            textAlign: "center",
-            marginBottom: spacing["2xl"],
-          }}
-        >
-          Unlock Flag Football
-        </Text>
+        <View style={{ alignItems: "center", marginBottom: spacing["2xl"] }}>
+          <Wordmark height={40} />
+        </View>
 
         <View
           style={{

@@ -12,7 +12,7 @@
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0D1117"
+      "backgroundColor": "#08090B"
     },
     "ios": {
       "bundleIdentifier": "com.unlockflagfootball.app",
@@ -22,7 +22,7 @@
       "package": "com.unlockflagfootball.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0D1117"
+        "backgroundColor": "#08090B"
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false

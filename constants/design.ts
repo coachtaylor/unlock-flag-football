@@ -173,6 +173,8 @@ export const fontFamily = {
   sansBold: "Inter_700Bold",
   mono: "JetBrainsMono_500Medium",
   monoBold: "JetBrainsMono_700Bold",
+  // Brand display face — used only by the logo wordmark (Anton).
+  display: "Anton_400Regular",
 } as const;
 
 export const tracking = {
