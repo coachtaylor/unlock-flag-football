@@ -311,10 +311,14 @@ export function PlayerForm({ teamId, initial, topInset }: Props) {
     if (!up.ok) {
       setPhotoBusy(false);
       const rls = /row-level security|violates|not authorized/i.test(up.error);
+      // Name the signed-in account on an RLS denial — the usual cause is being
+      // signed in as an account that doesn't manage this player's team.
+      const { data: auth } = await supabase.auth.getUser();
+      const who = auth.user?.email ?? "no signed-in account";
       showError(
         "Couldn't upload photo",
         rls
-          ? "Storage rejected the upload. The player-photos bucket policies likely need applying (run migration 108), or you don't manage this player's team."
+          ? `Storage denied the write for ${who}. That account doesn't manage this player's team — sign in as a coach / league admin of the team, then retry.`
           : up.error
       );
       return;
